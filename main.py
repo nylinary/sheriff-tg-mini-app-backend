@@ -1,8 +1,8 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers.auth import auth_router
-from .routers.users import users_router
+from routers.auth import auth_router
+from routers.users import users_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("miniapp")
