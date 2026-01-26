@@ -3,10 +3,10 @@ import hashlib
 import time
 from urllib.parse import parse_qsl
 from fastapi import HTTPException
-import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-INITDATA_MAX_AGE_SECONDS = int(os.getenv("INITDATA_MAX_AGE_SECONDS", "300"))
+from settings import settings
+
+INITDATA_MAX_AGE_SECONDS = settings.initdata_max_age_seconds
 
 def _webapp_secret_key(bot_token: str) -> bytes:
     return hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()

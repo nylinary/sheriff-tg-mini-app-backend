@@ -1,16 +1,18 @@
 import json
 import logging
-import os
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
 from schemas.auth import AuthPayload
 from utils import verify_init_data
 from db import SessionLocal
 from models.user import User
+from settings import settings
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+
+BOT_TOKEN = settings.bot_token
 log = logging.getLogger("miniapp")
 
 auth_router = APIRouter()

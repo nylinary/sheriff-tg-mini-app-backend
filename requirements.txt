@@ -1,8 +1,10 @@
 fastapi
 uvicorn[standard]
 pydantic
+pydantic-settings
 pyjwt
 asyncpg
 sqlalchemy
 alembic
 psycopg2-binary
+python-dotenv
