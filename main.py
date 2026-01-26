@@ -7,6 +7,8 @@ from urllib.parse import parse_qsl
 import time
 import hmac
 import hashlib
+from fastapi.middleware.cors import CORSMiddleware
+
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -23,6 +25,16 @@ log = logging.getLogger("miniapp")
 
 
 app = FastAPI(title="MiniApp backend logger")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://sherifex.com",   # или твой кастом-домен
+        "https://web.telegram.org",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],   # минимум: ["POST", "OPTIONS"]
+    allow_headers=["*"],   # минимум: ["Content-Type", "Authorization"]
+)
 
 # --------- global request logger ----------
 @app.middleware("http")
