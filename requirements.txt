@@ -3,6 +3,7 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 pyjwt
+PyJWT
 asyncpg
 sqlalchemy
 alembic
