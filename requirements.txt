@@ -4,3 +4,5 @@ pydantic
 pyjwt
 asyncpg
 sqlalchemy
+alembic
+psycopg2-binary
