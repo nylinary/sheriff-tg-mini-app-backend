@@ -60,6 +60,76 @@ async def _get_current_user(request: Request, db: AsyncSession) -> User:
     return user
 
 
+# Map exchange labels to Webflow CMS field keys
+_WEBFLOW_RATE_FIELDS: Dict[str, str] = {
+    "USDT/USD": "usdt-to-usd-4",
+    "USD/USDT": "usd-to-usdt-2",
+    "USDT/EUR": "usdt-to-eur-4",
+    "EUR/USDT": "eur-to-usdt-2",
+    "USDT/RUB": "usdt-to-rub-5",
+    "RUB/USDT": "rub-to-usdt-2",
+    "USDT/AED": "usdt-to-aed-3",
+    "AED/USDT": "aed-to-usdt-2",
+}
+
+
+async def _get_webflow_exchange_rate(city: str, exchange_type: str) -> Optional[str]:
+    """Return the rate string from Webflow CMS for given city+exchange type, else None."""
+    items_url = getattr(settings, "webflow_cms_items_url", None)
+    api_key = getattr(settings, "webflow_api_key", None)
+    if not items_url or not api_key:
+        return None
+
+    field_key = _WEBFLOW_RATE_FIELDS.get((exchange_type or "").strip())
+    if not field_key:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+
+    # Webflow v2 uses pagination via limit/offset; we keep it simple with limit=100.
+    params = {"limit": 100, "offset": 0}
+
+    try:
+        timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(items_url, headers=headers, params=params)
+
+        if r.status_code < 200 or r.status_code >= 300:
+            log.warning("Webflow CMS rates fetch failed: %s %s", r.status_code, r.text)
+            return None
+
+        data = r.json()
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return None
+
+        city_norm = (city or "").strip().casefold()
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            fd = it.get("fieldData")
+            if not isinstance(fd, dict):
+                continue
+            name = (fd.get("name") or "").strip().casefold()
+            if name != city_norm:
+                continue
+            # found city item
+            raw_rate = fd.get(field_key)
+            if raw_rate is None:
+                return None
+            s = str(raw_rate).strip()
+            return s if s != "" else None
+
+        return None
+
+    except Exception:
+        log.exception("Webflow CMS rates fetch error")
+        return None
+
+
 async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     webhook_url = getattr(settings, "lead_webhook_url", None)
     if not webhook_url:
@@ -74,6 +144,12 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
     contact_by = "telegram_id"
     search = str(payload.get("tg_user_id") or "").strip()
 
+    # include exchange rate from Webflow CMS (may be None)
+    exchange_rate = await _get_webflow_exchange_rate(
+        str(payload.get("city") or ""),
+        str(payload.get("exchange_type") or ""),
+    )
+
     variables: Dict[str, Any] = {
         # core fields
         "lead_id": payload.get("lead_id"),
@@ -82,6 +158,7 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
         "receive_type": payload.get("receive_type"),
         "sum": payload.get("sum"),
         "wallet_address": payload.get("wallet_address"),
+        "exchange_rate": exchange_rate,
         # user fields
         "tg_user_id": payload.get("tg_user_id"),
         "username": payload.get("username"),
