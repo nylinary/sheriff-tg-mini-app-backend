@@ -176,6 +176,18 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
         "variables": variables,
     }
 
+    # Log outgoing request body for debugging
+    try:
+        log.info(
+            "Webhook request body: contact_by=%s search=%s variables_keys=%s",
+            contact_by,
+            search,
+            sorted(list(variables.keys())),
+        )
+        log.debug("Webhook request JSON: %s", webhook_payload)
+    except Exception:
+        pass
+
     try:
         timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
