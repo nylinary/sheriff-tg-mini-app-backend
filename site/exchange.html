@@ -772,16 +772,17 @@
       btn.setAttribute("aria-disabled", disabled.toString());
       btn.classList.toggle("is-disabled", disabled);
 
-      // If submit element is an <a>, do NOT disable via pointer-events.
-      // Webflow may rely on it for clickability; we block navigation in handler anyway.
+      // If submit element is a native form control, disable it.
       if (btn instanceof HTMLButtonElement || btn instanceof HTMLInputElement) {
         btn.disabled = disabled;
+        if (disabled) btn.setAttribute("tabindex", "-1");
+        else btn.removeAttribute("tabindex");
       } else {
+        // If submit is an <a> (Webflow button), keep it clickable and only style it.
         btn.style.opacity = disabled ? "0.6" : "";
+        // Do not change tabindex for anchors; Webflow styles may rely on it.
+        btn.removeAttribute("tabindex");
       }
-
-      if (disabled) btn.setAttribute("tabindex", "-1");
-      else btn.removeAttribute("tabindex");
     }
 
     if (form) {
