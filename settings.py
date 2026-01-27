@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     cookie_samesite: str = "none"  # 'none' required for TG webview + cross-site cookies
 
+    # Optional: where to forward leads as webhook
+    lead_webhook_url: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
