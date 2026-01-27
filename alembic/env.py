@@ -1,25 +1,30 @@
 from logging.config import fileConfig
-from sqlalchemy import pool
 from alembic import context
 import sys
 import os
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from db import Base, alembic_engine
+
+from db import Base, get_alembic_engine
 
 config = context.config
 fileConfig(config.config_file_name)
 target_metadata = Base.metadata
+
 
 def run_migrations_offline():
     context.configure(url=config.get_main_option("sqlalchemy.url"), target_metadata=target_metadata, literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
 
+
 def run_migrations_online():
+    alembic_engine = get_alembic_engine()
     with alembic_engine.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
+
 
 if context.is_offline_mode():
     run_migrations_offline()
