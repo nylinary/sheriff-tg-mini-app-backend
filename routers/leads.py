@@ -210,15 +210,39 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
         return {"status": 0, "error": str(e)}
 
 
+def _normalize_receive_type(raw: str | None) -> str:
+    t = str(raw or "").strip()
+    if not t:
+        return ""
+
+    # normalize slashes and whitespace
+    t_norm = " ".join(t.replace("\\", "/").split())
+
+    # Map UI labels to canonical values
+    if t_norm.casefold() in {"в офисе / с менеджером".casefold(), "в офисе/с менеджером".casefold()}:
+        return "офис"
+    if t_norm.casefold() == "на карту (только выплата фиата!)".casefold():
+        return "карта"
+
+    return t_norm
+
+
 @leads_router.post("/leads")
 async def create_lead(body: LeadCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    log.info("LEADS_ENDPOINT_HIT %s %s from=%s", request.method, request.url.path, request.client.host if request.client else None)
+    log.info(
+        "LEADS_ENDPOINT_HIT %s %s from=%s",
+        request.method,
+        request.url.path,
+        request.client.host if request.client else None,
+    )
     user = await _get_current_user(request, db)
+
+    receive_type_norm = _normalize_receive_type(body.receive_type)
 
     out: Dict[str, Any] = {
         "city": body.city,
         "exchange_type": body.exchange_type,
-        "receive_type": body.receive_type,
+        "receive_type": receive_type_norm,
         "sum": body.sum,
         "wallet_address": body.wallet_address,
         "tg_user_id": user.tg_user_id,
@@ -232,7 +256,7 @@ async def create_lead(body: LeadCreate, request: Request, db: AsyncSession = Dep
         username=user.username,
         city=body.city,
         exchange_type=body.exchange_type,
-        receive_type=body.receive_type,
+        receive_type=receive_type_norm,
         sum=body.sum,
         wallet_address=body.wallet_address,
         meta=body.meta or {},
