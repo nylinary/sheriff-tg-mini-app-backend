@@ -485,7 +485,6 @@
   const AUTH_REFRESH_ENDPOINT = "/auth/refresh";
   const TOKEN_STORAGE_KEY = "__sheriff_tokens_v1";
   const CITY_STORAGE_KEY = "__sheriff_selected_city_v1";
-  const AUTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 минут
 
   // Default placeholder texts
   const DEFAULT_EXCHANGE_TYPE_LABEL = "Выберите тип сделки";
@@ -535,15 +534,21 @@
     return elapsed > (tokens.expires_in * 1000) - (5 * 60 * 1000);
   }
 
+  function hasValidInitData() {
+    const initData = window.Telegram?.WebApp?.initData || "";
+    return initData && initData.length > 0;
+  }
+
   async function performTelegramAuth() {
     try {
-      const initData = window.Telegram?.WebApp?.initData || "";
-      if (!initData) {
-        throw new Error("No Telegram init data");
+      // Проверяем, есть ли initData
+      if (!hasValidInitData()) {
+        console.warn("No Telegram initData available on exchange page");
+        return null; // Возвращаем null вместо ошибки
       }
 
       const payload = {
-        initData: initData,
+        initData: window.Telegram.WebApp.initData,
         meta: {
           platform: window.Telegram?.WebApp?.platform || null,
           version: window.Telegram?.WebApp?.version || null,
@@ -562,44 +567,8 @@
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Auth failed: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      
-      // Сохраняем токены, если они есть в ответе
-      if (data?.access_token && data?.refresh_token) {
-        setStoredTokens({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-          token_type: data.token_type || "bearer",
-          expires_in: data.expires_in || 3600, // дефолтное значение
-        });
-      }
-      
-      return data;
-    } catch (error) {
-      console.error("Telegram auth error:", error);
-      clearStoredTokens();
-      throw error;
-    }
-  }
-
-  async function refreshAccessToken() {
-    try {
-      const response = await fetch(BACKEND_BASE + AUTH_REFRESH_ENDPOINT, {
-        method: "POST",
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          // Refresh токен устарел, нужна новая авторизация
-          clearStoredTokens();
-          throw new Error("Refresh token expired, need re-auth");
-        }
-        const errorText = await response.text();
-        throw new Error(`Refresh failed: ${response.status} - ${errorText}`);
+        console.error("Auth failed:", response.status, errorText);
+        return null; // Возвращаем null вместо ошибки
       }
 
       const data = await response.json();
@@ -611,74 +580,141 @@
           token_type: data.token_type || "bearer",
           expires_in: data.expires_in || 3600,
         });
+        console.log("Auth successful on exchange page, tokens saved");
         return data;
       } else {
-        throw new Error("No tokens in refresh response");
+        console.warn("Auth response without tokens");
+        return data;
+      }
+    } catch (error) {
+      console.error("Telegram auth error on exchange page:", error);
+      clearStoredTokens();
+      return null; // Возвращаем null вместо ошибки
+    }
+  }
+
+  async function refreshAccessToken() {
+    try {
+      console.log("Attempting token refresh...");
+      const response = await fetch(BACKEND_BASE + AUTH_REFRESH_ENDPOINT, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          console.warn("Refresh token expired");
+          clearStoredTokens();
+          return null; // Возвращаем null вместо ошибки
+        }
+        const errorText = await response.text();
+        console.error("Refresh failed:", response.status, errorText);
+        return null; // Возвращаем null вместо ошибки
+      }
+
+      const data = await response.json();
+      
+      if (data?.access_token && data?.refresh_token) {
+        setStoredTokens({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          token_type: data.token_type || "bearer",
+          expires_in: data.expires_in || 3600,
+        });
+        console.log("Token refresh successful");
+        return data;
+      } else {
+        console.warn("Refresh response without tokens");
+        return data;
       }
     } catch (error) {
       console.error("Refresh token error:", error);
       clearStoredTokens();
-      throw error;
+      return null; // Возвращаем null вместо ошибки
     }
   }
 
   async function ensureValidTokens() {
-    // 1. Если токенов нет вообще - делаем полную авторизацию
-    if (!getStoredTokens()) {
-      return await performTelegramAuth();
-    }
-    
-    // 2. Если токены просрочены - обновляем
-    if (areTokensExpired()) {
-      try {
-        return await refreshAccessToken();
-      } catch (refreshError) {
-        // Если refresh не удался, пробуем полную авторизацию
-        console.warn("Refresh failed, trying full auth:", refreshError);
-        return await performTelegramAuth();
+    try {
+      // 1. Если токенов нет вообще
+      const tokens = getStoredTokens();
+      if (!tokens) {
+        console.log("No tokens found");
+        
+        // Пробуем сделать авторизацию, только если есть initData
+        if (hasValidInitData()) {
+          console.log("Has initData, trying auth...");
+          return await performTelegramAuth();
+        } else {
+          console.log("No initData, cannot auth on exchange page");
+          return null; // Не можем сделать авторизацию без initData
+        }
       }
+      
+      // 2. Если токены просрочены
+      if (areTokensExpired()) {
+        console.log("Tokens expired, refreshing...");
+        const refreshed = await refreshAccessToken();
+        if (!refreshed && hasValidInitData()) {
+          console.log("Refresh failed, trying full auth...");
+          return await performTelegramAuth();
+        }
+        return refreshed;
+      }
+      
+      // 3. Токены валидны
+      console.log("Tokens are valid");
+      return tokens;
+    } catch (error) {
+      console.error("ensureValidTokens error:", error);
+      return null;
     }
-    
-    // 3. Токены валидны
-    return getStoredTokens();
   }
 
   async function apiFetch(path, options = {}) {
-    // Убеждаемся, что токены валидны перед запросом
-    await ensureValidTokens();
+    // Пробуем получить валидные токены, но не падаем если не получилось
+    let tokens = getStoredTokens();
     
-    const tokens = getStoredTokens();
+    // Если токенов нет или они просрочены, пробуем обновить
+    if (!tokens || areTokensExpired()) {
+      tokens = await ensureValidTokens();
+    }
+    
     const headers = new Headers(options.headers || {});
     
     if (tokens?.access_token) {
       headers.set("Authorization", `Bearer ${tokens.access_token}`);
+      console.log("Using token for request");
+    } else {
+      console.warn("No access token available for request, sending without auth");
     }
     
-    const response = await fetch(BACKEND_BASE + path, {
-      ...options,
-      headers,
-      credentials: "include",
-    });
+    let response;
+    try {
+      response = await fetch(BACKEND_BASE + path, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+    } catch (error) {
+      console.error("Network error:", error);
+      throw error;
+    }
     
     // Если получили 401, пробуем обновить токен и повторить
     if (response.status === 401) {
-      try {
-        await refreshAccessToken();
-        const newTokens = getStoredTokens();
-        
+      console.log("Received 401, attempting token refresh...");
+      const refreshedTokens = await refreshAccessToken();
+      
+      if (refreshedTokens?.access_token) {
         const newHeaders = new Headers(options.headers || {});
-        if (newTokens?.access_token) {
-          newHeaders.set("Authorization", `Bearer ${newTokens.access_token}`);
-        }
+        newHeaders.set("Authorization", `Bearer ${refreshedTokens.access_token}`);
         
-        return await fetch(BACKEND_BASE + path, {
+        response = await fetch(BACKEND_BASE + path, {
           ...options,
           headers: newHeaders,
           credentials: "include",
         });
-      } catch (error) {
-        console.error("Failed to refresh and retry:", error);
-        throw error;
       }
     }
     
@@ -717,15 +753,32 @@
 
   // Get form field values
   function getSelectedCity() {
-    return localStorage.getItem(CITY_STORAGE_KEY) || "";
+    // prefer storage (existing behavior)
+    const stored = localStorage.getItem(CITY_STORAGE_KEY) || "";
+    const v = normalizeLabel(stored);
+    if (v) return v;
+
+    // fallback: read from UI label
+    const el = document.getElementById("selected-city");
+    return normalizeLabel(el?.textContent || "");
   }
 
   function getSelectedExchangeType() {
-    return localStorage.getItem("__sheriff_selected_exchange_type_v1") || "";
+    const stored = localStorage.getItem("__sheriff_selected_exchange_type_v1") || "";
+    const v = normalizeLabel(stored);
+    if (v) return v;
+
+    const el = document.getElementById("selected-echange-type-label");
+    return normalizeLabel(el?.textContent || "");
   }
 
   function getSelectedReceiveType() {
-    return localStorage.getItem("__sheriff_selected_receive_type_v1") || "";
+    const stored = localStorage.getItem("__sheriff_selected_receive_type_v1") || "";
+    const v = normalizeLabel(stored);
+    if (v) return v;
+
+    const el = document.getElementById("receive-type-dd-label");
+    return normalizeLabel(el?.textContent || "");
   }
 
   function getSumValue() {
@@ -817,6 +870,8 @@
       },
     };
 
+    console.log("Sending lead:", payload);
+
     try {
       const response = await apiFetch(LEAD_ENDPOINT, {
         method: "POST",
@@ -830,6 +885,7 @@
         return false;
       }
 
+      console.log("Lead sent successfully");
       return true;
     } catch (error) {
       console.error("Failed to send lead:", error);
@@ -852,31 +908,31 @@
       console.warn("Form not found (submit button may be outside). Will handle button click only.");
     }
 
-    // 1. Проверяем и обновляем токены при загрузке страницы
-    try {
-      await ensureValidTokens();
-      console.log("Tokens are valid");
-    } catch (error) {
-      console.error("Failed to get valid tokens:", error);
-      // Показываем пользователю сообщение об ошибке
-      alert("Ошибка авторизации. Пожалуйста, перезайдите в приложение.");
-      return;
+    // 1. Инициализируем Telegram WebApp если доступен
+    if (window.Telegram?.WebApp) {
+      window.Telegram.WebApp.ready();
+      console.log("Telegram WebApp initialized on exchange page");
     }
 
-    // 2. Настраиваем периодическую проверку токенов
-    setInterval(async () => {
+    // 2. Проверяем токены в фоновом режиме БЕЗ АЛЕРТОВ
+    setTimeout(async () => {
       try {
-        await ensureValidTokens();
+        const tokens = await ensureValidTokens();
+        if (tokens) {
+          console.log("Tokens validated on page load");
+        } else {
+          console.log("No valid tokens available - this is normal for new users");
+          // НЕ показываем алерт - пользователь мог прийти с главной страницы
+          // где авторизация уже сделана, или он новичок
+        }
       } catch (error) {
-        console.warn("Periodic token check failed:", error);
+        console.warn("Token validation on load failed:", error);
+        // НЕ показываем алерт - это не критичная ошибка
       }
-    }, AUTH_CHECK_INTERVAL);
+    }, 1000);
 
     // 3. Настраиваем UI формы
-    // Disable button initially
     setFormSubmitEnabled(false);
-
-    // Set up validation listeners
     recomputeSubmitEnabled();
     
     // Re-check validation after a short delay (Webflow might initialize elements slowly)
@@ -923,20 +979,36 @@
         recomputeSubmitEnabled();
         // restore href if we blocked it
         if (originalHref) el.setAttribute("href", originalHref);
+        alert("Пожалуйста, заполните все поля формы правильно.");
         return;
       }
 
       isSubmitting = true;
 
+      // Показываем индикатор загрузки
+      const originalText = btn.textContent;
+      btn.style.opacity = "0.7";
+      btn.style.cursor = "wait";
+
       try {
-        await sendLeadToBackend();
+        const success = await sendLeadToBackend();
+        
+        if (success) {
+          console.log("Redirecting to /bot-done");
+          window.location.href = "/bot-done";
+        } else {
+          alert("Не удалось отправить заявку. Пожалуйста, попробуйте еще раз.");
+        }
       } catch (error) {
         console.error("Submission error:", error);
+        alert("Произошла ошибка при отправке. Пожалуйста, попробуйте еще раз.");
       } finally {
-        window.location.href = "/bot-done";
-        // restore href (in case redirect is blocked by WebView)
-        if (originalHref) el.setAttribute("href", originalHref);
+        // Восстанавливаем кнопку
         isSubmitting = false;
+        btn.style.opacity = "";
+        btn.style.cursor = "";
+        if (originalHref) el.setAttribute("href", originalHref);
+        recomputeSubmitEnabled();
       }
     }
 
@@ -953,7 +1025,10 @@
       getStoredTokens,
       clearStoredTokens,
       areTokensExpired,
+      apiFetch,
     };
+    
+    console.log("Exchange form initialized");
   });
 })();
 </script>
