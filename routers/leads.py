@@ -68,17 +68,47 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
 
     log.info("Webhook forward target: %s", webhook_url)
 
+    # Leadteh inner_webhook expects:
+    # {"contact_by": "telegram_id"|"telegram_name"|..., "search": "...", "variables": {...}}
+    # See docs screenshot.
+    contact_by = "telegram_id"
+    search = str(payload.get("tg_user_id") or "").strip()
+
+    variables: Dict[str, Any] = {
+        # core fields
+        "lead_id": payload.get("lead_id"),
+        "city": payload.get("city"),
+        "exchange_type": payload.get("exchange_type"),
+        "receive_type": payload.get("receive_type"),
+        "sum": payload.get("sum"),
+        "wallet_address": payload.get("wallet_address"),
+        # user fields
+        "tg_user_id": payload.get("tg_user_id"),
+        "username": payload.get("username"),
+    }
+
+    # Flatten meta into variables (Leadteh variables is an object)
+    meta = payload.get("meta") or {}
+    if isinstance(meta, dict):
+        for k, v in meta.items():
+            variables[f"meta_{k}"] = v
+
+    webhook_payload: Dict[str, Any] = {
+        "contact_by": contact_by,
+        "search": search,
+        "variables": variables,
+    }
+
     try:
         timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            r = await client.post(webhook_url, json=payload)
+            r = await client.post(webhook_url, json=webhook_payload)
 
         try:
             body = r.json()
         except Exception:
             body = r.text
 
-        # Always log result so it is obvious it ran
         if 200 <= r.status_code < 300:
             log.info("Webhook delivered: %s", r.status_code)
         else:
