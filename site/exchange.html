@@ -696,7 +696,23 @@
   }
 
   function getSubmitForm() {
-    return getSubmitEl()?.closest("form") || null;
+    // Prefer specific Webflow form id if present
+    const byId = document.getElementById("email-form");
+    if (byId instanceof HTMLFormElement) return byId;
+
+    // Prefer nearest form when button is inside a form
+    const btn = getSubmitEl();
+    const byBtn = btn?.closest?.("form") || null;
+    if (byBtn) return byBtn;
+
+    // Fallback: find a form containing our inputs (when button is outside)
+    const sumEl = document.getElementById("sum-input");
+    const walletEl = document.getElementById("wallet-address-input");
+    return (
+      (sumEl && sumEl.closest && sumEl.closest("form")) ||
+      (walletEl && walletEl.closest && walletEl.closest("form")) ||
+      null
+    );
   }
 
   // Get form field values
@@ -756,10 +772,12 @@
       btn.setAttribute("aria-disabled", disabled.toString());
       btn.classList.toggle("is-disabled", disabled);
 
+      // If submit element is an <a>, do NOT disable via pointer-events.
+      // Webflow may rely on it for clickability; we block navigation in handler anyway.
       if (btn instanceof HTMLButtonElement || btn instanceof HTMLInputElement) {
         btn.disabled = disabled;
       } else {
-        btn.style.pointerEvents = disabled ? "none" : "";
+        btn.style.opacity = disabled ? "0.6" : "";
       }
 
       if (disabled) btn.setAttribute("tabindex", "-1");
@@ -824,9 +842,13 @@
     const btn = getSubmitEl();
     const form = getSubmitForm();
 
-    if (!btn || !form) {
-      console.warn("Submit button or form not found");
+    if (!btn) {
+      console.warn("Submit button not found");
       return;
+    }
+
+    if (!form) {
+      console.warn("Form not found (submit button may be outside). Will handle button click only.");
     }
 
     // 1. Проверяем и обновляем токены при загрузке страницы
@@ -885,17 +907,21 @@
     let isSubmitting = false;
 
     async function handleSubmit(event) {
-      // Prevent default Webflow form submission
-      if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      // Prevent default Webflow form submission / link navigation
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      // If the submit is an <a>, temporarily remove href to prevent navigation race
+      const el = getSubmitEl();
+      const originalHref = el?.getAttribute?.("href");
+      if (originalHref) el.removeAttribute("href");
 
       if (isSubmitting) return;
 
-      // Final validation check
       if (!isFormReadyToSubmit()) {
         recomputeSubmitEnabled();
+        // restore href if we blocked it
+        if (originalHref) el.setAttribute("href", originalHref);
         return;
       }
 
@@ -903,18 +929,20 @@
 
       try {
         await sendLeadToBackend();
-        window.location.href = "/bot-done";
       } catch (error) {
         console.error("Submission error:", error);
-        window.location.href = "/bot-done";
       } finally {
+        window.location.href = "/bot-done";
+        // restore href (in case redirect is blocked by WebView)
+        if (originalHref) el.setAttribute("href", originalHref);
         isSubmitting = false;
       }
     }
 
     // Attach event listeners
-    btn.addEventListener("click", handleSubmit);
-    form.addEventListener("submit", handleSubmit);
+    // Use capture=true so our handler runs even if Webflow stops propagation.
+    btn.addEventListener("click", handleSubmit, true);
+    if (form) form.addEventListener("submit", handleSubmit);
     
     // Экспортируем API для отладки
     window.SheriffExchangeAuth = {
