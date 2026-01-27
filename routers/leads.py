@@ -184,6 +184,19 @@ async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]
             search,
             sorted(list(variables.keys())),
         )
+
+        # Also log variable values (truncate long strings to keep logs readable)
+        def _safe(v: Any):
+            if v is None:
+                return None
+            s = str(v)
+            return (s[:500] + "…") if len(s) > 500 else s
+
+        log.info(
+            "Webhook variables: %s",
+            {k: _safe(v) for k, v in variables.items()},
+        )
+
         log.debug("Webhook request JSON: %s", webhook_payload)
     except Exception:
         pass
