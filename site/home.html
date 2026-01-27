@@ -1,0 +1,126 @@
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  // ====== HOME PAGE: AUTH ONLY ======
+  const BACKEND_BASE = "https://sheriff-tg-mini-app-backend-dev.up.railway.app";
+  const AUTH_ENDPOINT = "/auth/telegram-webapp";
+  const REFRESH_ENDPOINT = "/auth/refresh";
+
+  // TEMP token storage (optional if you rely on HttpOnly cookies only)
+  const TOKEN_STORAGE_KEY = "__sheriff_tokens_v1";
+  function getStoredTokens() {
+    try { return JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || "null"); } catch { return null; }
+  }
+  function setStoredTokens(tokens) { localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens)); }
+  function clearStoredTokens() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+
+  function tgInitData() {
+    return window.Telegram?.WebApp?.initData || "";
+  }
+
+  async function telegramAuth() {
+    const payload = {
+      initData: tgInitData(),
+      meta: {
+        platform: window.Telegram?.WebApp?.platform || null,
+        version: window.Telegram?.WebApp?.version || null,
+        color_scheme: window.Telegram?.WebApp?.colorScheme || null,
+        page_url: location.href,
+        user_agent: navigator.userAgent,
+      },
+    };
+
+    const r = await fetch(BACKEND_BASE + AUTH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+
+    // TEMP: store tokens only if backend returns them in JSON.
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || "bearer",
+        expires_in: data.expires_in || null,
+        saved_at: Date.now(),
+      });
+    }
+
+    return data;
+  }
+
+  async function refreshAccessToken() {
+    const stored = getStoredTokens();
+
+    const r = await fetch(BACKEND_BASE + REFRESH_ENDPOINT, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) {
+      clearStoredTokens();
+      throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+    }
+
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || stored?.token_type || "bearer",
+        expires_in: data.expires_in || null,
+        saved_at: Date.now(),
+      });
+    }
+
+    return data;
+  }
+
+  async function apiFetch(path, options = {}) {
+    const stored = getStoredTokens();
+    const headers = new Headers(options.headers || {});
+
+    if (stored?.access_token) headers.set("Authorization", `Bearer ${stored.access_token}`);
+
+    const first = await fetch(BACKEND_BASE + path, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+
+    if (first.status !== 401) return first;
+
+    await refreshAccessToken();
+
+    const stored2 = getStoredTokens();
+    const headers2 = new Headers(options.headers || {});
+    if (stored2?.access_token) headers2.set("Authorization", `Bearer ${stored2.access_token}`);
+
+    return fetch(BACKEND_BASE + path, {
+      ...options,
+      headers: headers2,
+      credentials: "include",
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.Telegram?.WebApp?.ready?.();
+
+    // Home page: authenticate once when mini app opens.
+    // If already authenticated, backend can still issue fresh tokens/cookies.
+    await telegramAuth();
+
+    // Expose helpers if you want to use them from Webflow interactions.
+    window.SheriffHome = {
+      telegramAuth,
+      refreshAccessToken,
+      apiFetch,
+      getStoredTokens,
+      clearStoredTokens,
+    };
+  });
+</script>

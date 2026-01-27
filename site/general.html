@@ -1,0 +1,330 @@
+<!-- Close dd on iiem click -->
+<script>
+function closeDropdown(dd) {
+    const toggle = dd.querySelector(".w-dropdown-toggle");
+    const list = dd.querySelector(".w-dropdown-list");
+    if (!toggle || !list) {
+        console.log("Didn't find toggle or list", toggle, list)
+        return;
+    };
+
+    dd.classList.remove("w--open");
+    toggle.classList.remove("w--open");
+    list.classList.remove("w--open");
+
+    toggle.setAttribute("aria-expanded", "false");
+
+    if (list.style && list.style.display) {
+        list.style.display = "";
+        console.log("Hidden list", list, list.style, list.style.display);
+    } else {
+        console.log("List is strange", list, list.style, list.style.display)
+    }
+}
+
+document.addEventListener("click", (e) => {
+    const item = e.target.closest(".dd-item");
+    if (!item) return;
+
+    const dd = item.closest(".w-dropdown.dd");
+    if (!dd) return;
+
+    console.log("Got DD to close", dd);
+    closeDropdown(dd);
+});
+</script>
+
+<!-- Set as dd label clicked item -->
+<script>
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest(".dd-item");
+    if (!item) return;
+
+    const cityName = item.getAttribute("data-city-name") || item.textContent.trim();
+
+    const label = document.getElementById("selected-city");
+    if (label) label.textContent = cityName;
+  });
+</script>
+
+
+<!-- Change rates display based on selected dd item -->
+<script>
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = (value ?? "").toString();
+  }
+
+  function applyFromItem(item) {
+    if (!item) return;
+
+    const cityName =
+      item.getAttribute("data-city-name") || item.textContent.trim();
+
+    setText("selected-city", cityName);
+    setText("rate-rub-to-usdt", item.getAttribute("data-rub-to-usdt"));
+    setText("rate-usd-to-usdt", item.getAttribute("data-usd-to-usdt"));
+    setText("rate-eur-to-usdt", item.getAttribute("data-eur-to-usdt"));
+    setText("rate-aed-to-usdt", item.getAttribute("data-aed-to-usdt"));
+
+    setText("rate-usdt-to-rub", item.getAttribute("data-usdt-to-rub"));
+    setText("rate-usdt-to-usd", item.getAttribute("data-usdt-to-usd"));
+    setText("rate-usdt-to-eur", item.getAttribute("data-usdt-to-eur"));
+    setText("rate-usdt-to-aed", item.getAttribute("data-usdt-to-aed"));
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const first = document.querySelector(".dd-item[data-city-name]");
+    applyFromItem(first);
+  });
+
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest(".dd-item");
+    if (!item) return;
+    applyFromItem(item);
+  });
+</script>
+
+
+<!-- image replacing -->
+<script>
+  function setImageById(id, url) {
+    if (!url) return;
+
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Webflow Image может быть <img> или wrapper с <img> внутри
+    const img = el.tagName.toLowerCase() === "img" ? el : el.querySelector("img");
+    if (!img) return;
+
+    img.src = url;
+  }
+
+  function applyImageFromItem(item) {
+    if (!item) return;
+
+    const url = item.getAttribute("data-img");
+    setImageById("city-image", url);
+  }
+
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest(".dd-item");
+    if (!item) return;
+    applyImageFromItem(item);
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const first = document.querySelector(".dd-item[data-img]");
+    applyImageFromItem(first);
+  });
+</script>
+
+<!-- For hiding blocks of exchange rates for certain cities -->
+<script>
+const CITY_RATE_ORDER = {
+"Москва": [
+    "block-rub-to-usdt", 
+    // "block-usd-to-usdt", 
+    // "block-eur-to-usdt",
+
+    "block-usdt-to-rub",
+    // "block-usdt-to-usd",
+    // "block-usdt-to-eur",
+],
+"Санкт-Петербург": [
+    "block-rub-to-usdt",
+    // "block-usd-to-usdt",
+    // "block-eur-to-usdt",
+    
+    "block-usdt-to-rub",
+    // "block-usdt-to-usd",
+    // "block-usdt-to-eur",
+],
+"Тверь": [
+    "block-rub-to-usdt",
+    // "block-usd-to-usdt",
+    // "block-eur-to-usdt",
+    
+    "block-usdt-to-rub",
+    // "block-usdt-to-usd",
+    // "block-usdt-to-eur",
+],
+
+"Кипр": [
+    "block-eur-to-usdt",
+    "block-usdt-to-eur",
+],
+"Вена": [
+    "block-eur-to-usdt",
+    "block-usdt-to-eur",
+],
+"Прага": [
+    "block-eur-to-usdt",
+    "block-usdt-to-eur",
+],
+"Будапешт": [
+    "block-eur-to-usdt",
+    "block-usdt-to-eur",
+],
+"Братислава": [
+    "block-eur-to-usdt",
+    "block-usdt-to-eur",
+],
+
+"Ташкент": [
+    "block-usd-to-usdt",
+    "block-usdt-to-usd",
+],
+"Тбилиси": [
+    "block-usd-to-usdt",
+    "block-eur-to-usdt",
+    
+    "block-usdt-to-usd",
+    "block-usdt-to-eur",
+],
+
+"Дубай": [
+    "block-aed-to-usdt",
+    "block-usdt-to-aed",
+],
+
+"Израиль": [
+    "block-usd-to-usdt",
+    "block-usdt-to-usd",
+],
+"США": [
+    "block-usd-to-usdt",
+    "block-usdt-to-usd",
+]
+};
+
+const ALL_BLOCKS = [
+    "block-rub-to-usdt",
+    "block-usd-to-usdt",
+    "block-eur-to-usdt",
+    "block-aed-to-usdt",
+    "block-usdt-to-rub",
+    "block-usdt-to-usd",
+    "block-usdt-to-eur",
+    "block-usdt-to-aed"
+];
+
+// Define which blocks belong to which column so we never move items across columns.
+const BUY_BLOCKS = [
+  "block-rub-to-usdt",
+  "block-usd-to-usdt",
+  "block-eur-to-usdt",
+  "block-aed-to-usdt",
+];
+
+const SELL_BLOCKS = [
+  "block-usdt-to-rub",
+  "block-usdt-to-usd",
+  "block-usdt-to-eur",
+  "block-usdt-to-aed",
+];
+
+function intersectionOrdered(order, allowedSet) {
+  const out = [];
+  for (let i = 0; i < order.length; i++) {
+    const id = order[i];
+    if (allowedSet.has(id)) out.push(id);
+  }
+  return out;
+}
+
+function findCommonContainer(blockEls) {
+if (!blockEls.length) return null;
+
+let node = blockEls[0].parentElement;
+while (node) {
+    const ok = blockEls.every((el) => node.contains(el));
+    if (ok) return node;
+    node = node.parentElement;
+}
+return blockEls[0].parentElement || null;
+}
+
+function getRatesContainer() {
+const els = ALL_BLOCKS
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+return findCommonContainer(els);
+}
+
+function setDisplay(id, displayValue) {
+const el = document.getElementById(id);
+if (!el) return;
+el.style.display = displayValue;
+}
+
+function moveToTop(container, el) {
+if (!container || !el) return;
+container.insertBefore(el, container.firstChild);
+}
+
+function applyRatesLayout(cityName) {
+  const cityOrder = CITY_RATE_ORDER[cityName] || [];
+
+  // Split the city order into two sequences: buy-column ids and sell-column ids
+  const buyOrder = intersectionOrdered(cityOrder, new Set(BUY_BLOCKS));
+  const sellOrder = intersectionOrdered(cityOrder, new Set(SELL_BLOCKS));
+
+  // 1) hide all first
+  for (let i = 0; i < ALL_BLOCKS.length; i++) {
+    setDisplay(ALL_BLOCKS[i], "none");
+  }
+
+  // 2) show allowed blocks (no layout break, because we don't move them)
+  for (let i = 0; i < buyOrder.length; i++) {
+    setDisplay(buyOrder[i], "");
+  }
+  for (let i = 0; i < sellOrder.length; i++) {
+    setDisplay(sellOrder[i], "");
+  }
+
+  // 3) optional: reorder *within each column* if the CMS/order may differ.
+  // We only move blocks among siblings that share the same parent.
+  const moveInParent = (ids) => {
+    if (!ids.length) return;
+    const els = ids.map((id) => document.getElementById(id)).filter(Boolean);
+    if (!els.length) return;
+    const parent = els[0].parentElement;
+    if (!parent) return;
+
+    // Ensure all are children of the same parent; if not, do nothing.
+    for (let k = 0; k < els.length; k++) {
+      if (els[k].parentElement !== parent) return;
+    }
+
+    // Move in reverse so final order is ids[0..]
+    for (let j = ids.length - 1; j >= 0; j--) {
+      const el = document.getElementById(ids[j]);
+      if (!el) continue;
+      parent.insertBefore(el, parent.firstChild);
+    }
+  };
+
+  moveInParent(buyOrder);
+  moveInParent(sellOrder);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+const first = document.querySelector(".dd-item[data-city-name]");
+if (!first) return;
+const cityName = first.getAttribute("data-city-name") || first.textContent.trim();
+applyRatesLayout(cityName);
+});
+
+document.addEventListener("click", (e) => {
+const item = e.target.closest(".dd-item");
+if (!item) return;
+const cityName = item.getAttribute("data-city-name") || item.textContent.trim();
+applyRatesLayout(cityName);
+});
+</script>
+
+
+

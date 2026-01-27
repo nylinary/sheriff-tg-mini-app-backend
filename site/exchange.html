@@ -1,0 +1,781 @@
+<!-- Exchange types filtering (works only on exchange page; safe on other pages) -->
+<script>
+(function () {
+  const EXCHANGE_TYPE_STORAGE_KEY = "__sheriff_selected_exchange_type_v1";
+
+  // Prevent early ReferenceError: exchange-type code calls applyReceiveTypeRules()
+  // before receive-type section is initialized.
+  let applyReceiveTypeRules = function () {};
+
+  const CITY_EXCHANGE_TYPES = {
+    "Москва": ["USDT/RUB", "RUB/USDT"],
+    "Санкт-Петербург": ["USDT/RUB", "RUB/USDT"],
+    "Тверь": ["USDT/RUB", "RUB/USDT"],
+
+    "Кипр": ["USDT/EUR", "EUR/USDT"],
+    "Вена": ["USDT/EUR", "EUR/USDT"],
+    "Прага": ["USDT/EUR", "EUR/USDT"],
+    "Будапешт": ["USDT/EUR", "EUR/USDT"],
+    "Братислава": ["USDT/EUR", "EUR/USDT"],
+
+    "Ташкент": ["USDT/USD", "USD/USDT"],
+    "Израиль": ["USDT/USD", "USD/USDT"],
+    "Нью-Йорк": ["USDT/USD", "USD/USDT"],
+    "Лас-Вегас": ["USDT/USD", "USD/USDT"],
+    "Лос-Анджелес": ["USDT/USD", "USD/USDT"],
+    "Маями": ["USDT/USD", "USD/USDT"],
+
+    "Тбилиси": ["USDT/USD", "USD/USDT", "USDT/EUR", "EUR/USDT"],
+
+    "Дубай": ["USDT/AED", "AED/USDT"],
+  };
+
+  // Default placeholder texts (set to exactly what you show in UI)
+  const DEFAULT_EXCHANGE_TYPE_LABEL = "Выберите тип сделки";
+  const DEFAULT_RECEIVE_TYPE_LABEL = "Выберите тип получения";
+
+  function normalizeLabel(s) {
+    return String(s || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\s*\\\s*/g, "/")
+      .replace(/\s*\/\s*/g, "/");
+  }
+
+  function getSelectedExchangeType() {
+    return localStorage.getItem(EXCHANGE_TYPE_STORAGE_KEY) || "";
+  }
+
+  function setSelectedExchangeType(label) {
+    const normalized = normalizeLabel(label);
+    if (!normalized) {
+      localStorage.removeItem(EXCHANGE_TYPE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(EXCHANGE_TYPE_STORAGE_KEY, normalized);
+    applyReceiveTypeRules();
+  }
+
+  function setExchangeTypeDropdownLabel(label) {
+    const el = document.getElementById("selected-echange-type-label");
+    if (!el) return;
+    // Delay to avoid Webflow overriding label during dropdown close.
+    setTimeout(() => {
+      el.textContent = label || "";
+    }, 0);
+  }
+
+  function closeExchangeTypeDropdown() {
+    const list = document.getElementById("dd-exchange-types-list");
+    const dropdownRoot = list?.closest(".w-dropdown");
+    if (!dropdownRoot) return;
+
+    const toggle = dropdownRoot.querySelector(".w-dropdown-toggle");
+    const ddList = dropdownRoot.querySelector(".w-dropdown-list");
+
+    dropdownRoot.classList.remove("w--open");
+    toggle?.classList.remove("w--open");
+    ddList?.classList.remove("w--open");
+    toggle?.setAttribute("aria-expanded", "false");
+    if (ddList && ddList.style) ddList.style.display = "";
+  }
+
+  function resetExchangeTypeToDefault() {
+    localStorage.removeItem(EXCHANGE_TYPE_STORAGE_KEY);
+    setExchangeTypeDropdownLabel(DEFAULT_EXCHANGE_TYPE_LABEL);
+    // exchange type affects receive-type availability
+    applyReceiveTypeRules();
+  }
+
+  function resetReceiveTypeToDefault() {
+    localStorage.removeItem("__sheriff_selected_receive_type_v1");
+    const el = document.getElementById("receive-type-dd-label");
+    if (el) {
+      setTimeout(() => {
+        el.textContent = DEFAULT_RECEIVE_TYPE_LABEL;
+      }, 0);
+    }
+  }
+
+  function applyExchangeTypesForCity(cityName) {
+    const ddList = document.getElementById("dd-exchange-types-list");
+    if (!ddList) return; // not on this page
+
+    const allowed = (CITY_EXCHANGE_TYPES[String(cityName || "").trim()] || []).map(normalizeLabel);
+
+    // Webflow dropdown options are usually .w-dropdown-link
+    const wfOptions = ddList.querySelectorAll(".w-dropdown-link");
+    const nodes = wfOptions.length ? wfOptions : ddList.querySelectorAll("a, div, li");
+
+    nodes.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const text = normalizeLabel(node.textContent);
+      if (!text) return;
+      node.style.display = allowed.includes(text) ? "" : "none";
+    });
+
+    // If selected exchange type is not allowed for this city -> reset to placeholder
+    const currentRaw = getSelectedExchangeType();
+    const current = normalizeLabel(currentRaw);
+    if (current && !allowed.includes(current)) {
+      resetExchangeTypeToDefault();
+    } else if (current) {
+      // Ensure label stays in sync (fixes occasional empty label)
+      setExchangeTypeDropdownLabel(current);
+    } else {
+      // no selection yet
+      setExchangeTypeDropdownLabel(DEFAULT_EXCHANGE_TYPE_LABEL);
+    }
+  }
+
+  function bindExchangeTypeDropdownClicks() {
+    const ddList = document.getElementById("dd-exchange-types-list");
+    if (!ddList) return;
+
+    // Use bubble phase so Webflow can process the click first.
+    ddList.addEventListener("click", (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+
+      const option = target.closest(".w-dropdown-link");
+      if (!(option instanceof HTMLElement)) return;
+      if (option.style.display === "none") return;
+
+      const label = normalizeLabel(option.textContent);
+      if (!label) return;
+
+      setSelectedExchangeType(label);
+      setExchangeTypeDropdownLabel(label);
+
+      // Close after Webflow finishes its own handlers
+      setTimeout(() => closeExchangeTypeDropdown(), 0);
+    });
+  }
+
+  // Hook into the existing city dropdown items from this file (.dd-item)
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest(".dd-item");
+    if (!item) return;
+    const cityName = item.getAttribute("data-city-name") || item.textContent.trim();
+    if (cityName) applyExchangeTypesForCity(cityName);
+  });
+
+  function _firstVisibleOptionText(listId) {
+    const list = document.getElementById(listId);
+    if (!list) return "";
+    const wfOptions = list.querySelectorAll(".w-dropdown-link");
+    const nodes = wfOptions.length ? wfOptions : list.querySelectorAll("a, div, li");
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.style.display === "none") continue;
+      const text = normalizeLabel(node.textContent);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bindExchangeTypeDropdownClicks();
+
+    const first = document.querySelector(".dd-item[data-city-name]");
+    if (first) {
+      const cityName = first.getAttribute("data-city-name") || first.textContent.trim();
+      if (cityName) applyExchangeTypesForCity(cityName);
+    }
+
+    const saved = normalizeLabel(getSelectedExchangeType());
+    if (saved) {
+      setExchangeTypeDropdownLabel(saved);
+    } else {
+      setExchangeTypeDropdownLabel(DEFAULT_EXCHANGE_TYPE_LABEL);
+    }
+
+    const RECEIVE_TYPE_STORAGE_KEY = "__sheriff_selected_receive_type_v1";
+
+    // Label + list ids (per Webflow)
+    const RECEIVE_LABEL_ID = "receive-type-dd-label";
+    const RECEIVE_LIST_ID = "receive-type-dd-list";
+
+    // Text matchers (must match *visible text* of your dropdown items)
+    const RECEIVE_OFFICE_TEXT = "В офисе \\ с менеджером";
+    const RECEIVE_CARD_TEXT = "На карту (Только выплата фиата!)";
+
+    function isOfficeOption(label) {
+      return normalizeLabel(label) === normalizeLabel(RECEIVE_OFFICE_TEXT);
+    }
+
+    function isCardOption(label) {
+      return normalizeLabel(label) === normalizeLabel(RECEIVE_CARD_TEXT);
+    }
+
+    function getSelectedReceiveType() {
+      return localStorage.getItem(RECEIVE_TYPE_STORAGE_KEY) || "";
+    }
+
+    function setSelectedReceiveType(label) {
+      if (!label) {
+        localStorage.removeItem(RECEIVE_TYPE_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(RECEIVE_TYPE_STORAGE_KEY, String(label));
+    }
+
+    function setReceiveTypeDropdownLabel(label) {
+      const el = document.getElementById(RECEIVE_LABEL_ID);
+      if (!el) return;
+      setTimeout(() => {
+        el.textContent = label || "";
+      }, 0);
+    }
+
+    function closeReceiveTypeDropdown() {
+      const list = document.getElementById(RECEIVE_LIST_ID);
+      const dropdownRoot = list?.closest(".w-dropdown");
+      const toggle = dropdownRoot?.querySelector(".w-dropdown-toggle");
+      if (toggle instanceof HTMLElement) toggle.click();
+    }
+
+    // Determine whether the selected exchange type means "buying crypto".
+    // Rule: fiat/USDT (e.g. RUB/USDT, USD/USDT, EUR/USDT, AED/USDT) => buying crypto.
+    function isBuyingCrypto(exchangeTypeLabelRaw) {
+      const t = normalizeLabel(exchangeTypeLabelRaw).toUpperCase();
+      return /^(RUB|USD|EUR|AED)\/USDT$/.test(t);
+    }
+
+    // Define the real implementation now that receive-type helpers exist.
+    applyReceiveTypeRules = function () {
+      const ddList = document.getElementById(RECEIVE_LIST_ID);
+      if (!ddList) return;
+
+      const exchangeType = getSelectedExchangeType();
+      const onlyOffice = isBuyingCrypto(exchangeType);
+
+      const wfOptions = ddList.querySelectorAll(".w-dropdown-link");
+      const nodes = wfOptions.length ? wfOptions : ddList.querySelectorAll("a, div, li");
+
+      // Helper: check if an option is visible in the UI
+      const isOptionVisible = (predicate) => {
+        for (const node of nodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (node.style.display === "none") continue;
+          const text = normalizeLabel(node.textContent);
+          if (!text) continue;
+          if (predicate(text)) return true;
+        }
+        return false;
+      };
+
+      // 1) apply visibility
+      nodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        const text = normalizeLabel(node.textContent);
+        if (!text) return;
+
+        if (onlyOffice) {
+          node.style.display = isOfficeOption(text) ? "" : "none";
+        } else {
+          if (isOfficeOption(text) || isCardOption(text)) node.style.display = "";
+        }
+      });
+
+      // 2) ensure current selection is valid; if not - auto switch to a valid one
+      const current = normalizeLabel(getSelectedReceiveType());
+
+      const officeAvailable = onlyOffice ? true : isOptionVisible(isOfficeOption);
+      const cardAvailable = !onlyOffice && isOptionVisible(isCardOption);
+
+      const isCurrentValid = onlyOffice
+        ? isOfficeOption(current)
+        : isOfficeOption(current) || isCardOption(current);
+
+      if (!isCurrentValid) {
+        if (cardAvailable) {
+          setSelectedReceiveType(RECEIVE_CARD_TEXT);
+          setReceiveTypeDropdownLabel(RECEIVE_CARD_TEXT);
+        } else if (officeAvailable) {
+          setSelectedReceiveType(RECEIVE_OFFICE_TEXT);
+          setReceiveTypeDropdownLabel(RECEIVE_OFFICE_TEXT);
+        } else {
+          resetReceiveTypeToDefault();
+        }
+      }
+    };
+
+    function bindReceiveTypeDropdownClicks() {
+      const ddList = document.getElementById(RECEIVE_LIST_ID);
+      if (!ddList) return;
+
+      ddList.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+
+        const option = target.closest(".w-dropdown-link") || target.closest("a, div, li");
+        if (!(option instanceof HTMLElement)) return;
+
+        const label = normalizeLabel(option.textContent);
+        if (!label) return;
+
+        // Prevent selecting hidden options
+        if (option.style.display === "none") {
+          e.preventDefault?.();
+          e.stopPropagation?.();
+          return;
+        }
+
+        setSelectedReceiveType(label);
+        setReceiveTypeDropdownLabel(label);
+        closeReceiveTypeDropdown();
+
+        e.preventDefault?.();
+        e.stopPropagation?.();
+      });
+    }
+
+    bindReceiveTypeDropdownClicks();
+
+    // Restore persisted receive type label, otherwise show placeholder
+    const savedReceive = normalizeLabel(getSelectedReceiveType());
+    if (savedReceive) {
+      setReceiveTypeDropdownLabel(savedReceive);
+    } else {
+      setReceiveTypeDropdownLabel(DEFAULT_RECEIVE_TYPE_LABEL);
+    }
+
+    // Apply visibility rules immediately (depends on saved exchange type)
+    applyReceiveTypeRules();
+
+    // ====== INPUTS: SUM + WALLET ADDRESS ======
+    const SUM_STORAGE_KEY = "__sheriff_selected_sum_v1";
+    const WALLET_STORAGE_KEY = "__sheriff_selected_wallet_address_v1";
+
+    function parseValidNumber(raw) {
+      const s = String(raw || "").trim();
+      if (!s) return null;
+
+      // allow comma as decimal separator, remove spaces
+      const normalized = s.replace(/\s+/g, "").replace(/,/g, ".");
+
+      // Valid forms: 123, 123.45, .5, 0.5
+      if (!/^([0-9]+(\.[0-9]+)?|\.[0-9]+)$/.test(normalized)) return null;
+
+      const n = Number(normalized);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    }
+
+    function restoreInputValues() {
+      const sumEl = document.getElementById("sum-input");
+      const walletEl = document.getElementById("wallet-address-input");
+
+      if (sumEl instanceof HTMLInputElement) {
+        const savedSum = localStorage.getItem(SUM_STORAGE_KEY);
+        if (savedSum != null && savedSum !== "") sumEl.value = savedSum;
+      }
+
+      if (walletEl instanceof HTMLInputElement) {
+        const savedWallet = localStorage.getItem(WALLET_STORAGE_KEY);
+        if (savedWallet != null) walletEl.value = savedWallet;
+      }
+    }
+
+    function bindInputPersistence() {
+      const sumEl = document.getElementById("sum-input");
+      const walletEl = document.getElementById("wallet-address-input");
+
+      if (sumEl instanceof HTMLInputElement) {
+        // Restrict typing to digits + one decimal separator (.,)
+        sumEl.setAttribute("inputmode", "decimal");
+        sumEl.setAttribute("autocomplete", "off");
+
+        const sanitizeSum = (raw) => {
+          let s = String(raw ?? "");
+          // keep only digits and separators
+          s = s.replace(/[^0-9.,]/g, "");
+          // if multiple separators - keep the first one
+          const firstSepIdx = s.search(/[.,]/);
+          if (firstSepIdx !== -1) {
+            const before = s.slice(0, firstSepIdx + 1);
+            const after = s.slice(firstSepIdx + 1).replace(/[.,]/g, "");
+            s = before + after;
+          }
+          // normalize leading separator: ".5" or ",5" allowed
+          return s;
+        };
+
+        const setSumValidState = (state /* 'valid' | 'invalid' | 'neutral' */) => {
+          if (state === "neutral") {
+            sumEl.classList.remove("is-invalid");
+            sumEl.removeAttribute("aria-invalid");
+            return;
+          }
+          const isValid = state === "valid";
+          sumEl.classList.toggle("is-invalid", !isValid);
+          sumEl.setAttribute("aria-invalid", (!isValid).toString());
+        };
+
+        sumEl.addEventListener("input", () => {
+          const sanitized = sanitizeSum(sumEl.value);
+          if (sanitized !== sumEl.value) sumEl.value = sanitized;
+
+          if (sanitized.trim() === "") {
+            setSumValidState("neutral");
+            localStorage.removeItem(SUM_STORAGE_KEY);
+            return;
+          }
+
+          const parsed = parseValidNumber(sanitized);
+          if (parsed == null) {
+            setSumValidState("invalid");
+            // do not overwrite saved valid value if current is invalid
+            return;
+          }
+
+          setSumValidState("valid");
+          const normalizedToStore = sanitized.trim().replace(/\s+/g, "").replace(/,/g, ".");
+          localStorage.setItem(SUM_STORAGE_KEY, normalizedToStore);
+        });
+
+        sumEl.addEventListener("blur", () => {
+          const raw = sumEl.value;
+          if (raw.trim() === "") {
+            setSumValidState("neutral");
+            localStorage.removeItem(SUM_STORAGE_KEY);
+            return;
+          }
+          const parsed = parseValidNumber(raw);
+          if (parsed == null) setSumValidState("invalid");
+        });
+      }
+
+      if (walletEl instanceof HTMLInputElement) {
+        walletEl.setAttribute("autocomplete", "off");
+        walletEl.addEventListener("input", () => {
+          localStorage.setItem(WALLET_STORAGE_KEY, walletEl.value ?? "");
+        });
+        walletEl.addEventListener("blur", () => {
+          localStorage.setItem(WALLET_STORAGE_KEY, walletEl.value ?? "");
+        });
+      }
+    }
+
+    restoreInputValues();
+    bindInputPersistence();
+  });
+
+  // Extend API
+  window.SheriffExchangeTypes = {
+    applyExchangeTypesForCity,
+    getSelectedExchangeType,
+    setSelectedExchangeType,
+    applyReceiveTypeRules,
+    resetExchangeTypeToDefault,
+    resetReceiveTypeToDefault,
+  };
+})();
+</script>
+
+<!-- SUBMIT BUTTON LOGIC - Send data to backend and redirect to /bot-done -->
+<script>
+(function() {
+  // Configuration
+  const SUBMIT_BUTTON_ID = "submit-btn";
+  const BACKEND_BASE = "https://sheriff-tg-mini-app-backend-dev.up.railway.app";
+  const LEAD_ENDPOINT = "/leads";
+  const AUTH_REFRESH_ENDPOINT = "/auth/refresh";
+  const TOKEN_STORAGE_KEY = "__sheriff_tokens_v1";
+  const CITY_STORAGE_KEY = "__sheriff_selected_city_v1";
+
+  // Default placeholder texts
+  const DEFAULT_EXCHANGE_TYPE_LABEL = "Выберите тип сделки";
+  const DEFAULT_RECEIVE_TYPE_LABEL = "Выберите тип получения";
+
+  function normalizeLabel(s) {
+    return String(s || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\s*\\\s*/g, "/")
+      .replace(/\s*\/\s*/g, "/");
+  }
+
+  // Helper functions
+  function getStoredTokens() {
+    try {
+      return JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function setStoredTokens(tokens) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
+  }
+
+  function clearStoredTokens() {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+
+  async function refreshAccessToken() {
+    const stored = getStoredTokens();
+
+    const r = await fetch(BACKEND_BASE + AUTH_REFRESH_ENDPOINT, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) {
+      clearStoredTokens();
+      throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+    }
+
+    // Backend returns tokens in JSON in this project
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || stored?.token_type || "bearer",
+        expires_in: data.expires_in || null,
+        saved_at: Date.now(),
+      });
+    }
+
+    return data;
+  }
+
+  async function apiFetch(path, options) {
+    const stored = getStoredTokens();
+    const headers = new Headers((options && options.headers) || {});
+
+    if (stored?.access_token) headers.set("Authorization", `Bearer ${stored.access_token}`);
+
+    const first = await fetch(BACKEND_BASE + path, {
+      ...(options || {}),
+      headers,
+      credentials: "include",
+    });
+
+    if (first.status !== 401) return first;
+
+    // try refresh + retry once
+    await refreshAccessToken();
+
+    const stored2 = getStoredTokens();
+    const headers2 = new Headers((options && options.headers) || {});
+    if (stored2?.access_token) headers2.set("Authorization", `Bearer ${stored2.access_token}`);
+
+    return fetch(BACKEND_BASE + path, {
+      ...(options || {}),
+      headers: headers2,
+      credentials: "include",
+    });
+  }
+
+  function isNonEmpty(v) {
+    return String(v ?? "").trim().length > 0;
+  }
+
+  function getSubmitEl() {
+    return document.getElementById(SUBMIT_BUTTON_ID);
+  }
+
+  function getSubmitForm() {
+    return getSubmitEl()?.closest("form") || null;
+  }
+
+  // Get form field values
+  function getSelectedCity() {
+    return localStorage.getItem(CITY_STORAGE_KEY) || "";
+  }
+
+  function getSelectedExchangeType() {
+    return localStorage.getItem("__sheriff_selected_exchange_type_v1") || "";
+  }
+
+  function getSelectedReceiveType() {
+    return localStorage.getItem("__sheriff_selected_receive_type_v1") || "";
+  }
+
+  function getSumValue() {
+    const el = document.getElementById("sum-input");
+    return el instanceof HTMLInputElement ? el.value : "";
+  }
+
+  function getWalletValue() {
+    const el = document.getElementById("wallet-address-input");
+    return el instanceof HTMLInputElement ? el.value : "";
+  }
+
+  // Validation
+  function isValidSumValue(raw) {
+    if (!isNonEmpty(raw)) return false;
+    const normalized = String(raw).trim().replace(/\s+/g, "").replace(/,/g, ".");
+    if (!/^([0-9]+(\.[0-9]+)?|\.[0-9]+)$/.test(normalized)) return false;
+    const n = Number(normalized);
+    return Number.isFinite(n);
+  }
+
+  function isFormReadyToSubmit() {
+    const okCity = isNonEmpty(getSelectedCity());
+
+    const exType = normalizeLabel(getSelectedExchangeType());
+    const okExType = isNonEmpty(exType) && exType !== normalizeLabel(DEFAULT_EXCHANGE_TYPE_LABEL);
+
+    const receiveRaw = normalizeLabel(getSelectedReceiveType());
+    const okReceive = isNonEmpty(receiveRaw) && receiveRaw !== normalizeLabel(DEFAULT_RECEIVE_TYPE_LABEL);
+
+    const okSum = isValidSumValue(getSumValue());
+    const okWallet = isNonEmpty(getWalletValue());
+
+    return okCity && okExType && okReceive && okSum && okWallet;
+  }
+
+  // UI state management
+  function setFormSubmitEnabled(enabled) {
+    const btn = getSubmitEl();
+    const form = getSubmitForm();
+    const disabled = !enabled;
+
+    if (btn) {
+      btn.setAttribute("aria-disabled", disabled.toString());
+      btn.classList.toggle("is-disabled", disabled);
+
+      if (btn instanceof HTMLButtonElement || btn instanceof HTMLInputElement) {
+        btn.disabled = disabled;
+      } else {
+        btn.style.pointerEvents = disabled ? "none" : "";
+      }
+
+      if (disabled) btn.setAttribute("tabindex", "-1");
+      else btn.removeAttribute("tabindex");
+    }
+
+    if (form) {
+      const submits = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+      submits.forEach((el) => {
+        if (el instanceof HTMLButtonElement || el instanceof HTMLInputElement) {
+          el.disabled = disabled;
+        }
+        el.setAttribute("aria-disabled", disabled.toString());
+        el.classList.toggle("is-disabled", disabled);
+      });
+    }
+  }
+
+  function recomputeSubmitEnabled() {
+    setFormSubmitEnabled(isFormReadyToSubmit());
+  }
+
+  // Send data to backend (with auto-refresh)
+  async function sendLeadToBackend() {
+    const payload = {
+      city: normalizeLabel(getSelectedCity()),
+      exchange_type: normalizeLabel(getSelectedExchangeType()),
+      receive_type: normalizeLabel(getSelectedReceiveType()),
+      sum: String(getSumValue() || "").trim(),
+      wallet_address: String(getWalletValue() || "").trim(),
+      meta: {
+        page_url: location.href,
+        user_agent: navigator.userAgent,
+        tg_platform: window.Telegram?.WebApp?.platform || null,
+        tg_version: window.Telegram?.WebApp?.version || null,
+      },
+    };
+
+    try {
+      const response = await apiFetch(LEAD_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Backend error:", response.status, errorText);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Failed to send lead:", error);
+      return false;
+    }
+  }
+
+  // Initialize
+  document.addEventListener("DOMContentLoaded", () => {
+    const btn = getSubmitEl();
+    const form = getSubmitForm();
+
+    if (!btn || !form) {
+      console.warn("Submit button or form not found");
+      return;
+    }
+
+    // Disable button initially
+    setFormSubmitEnabled(false);
+
+    // Set up validation listeners
+    recomputeSubmitEnabled();
+
+    // Re-check validation after a short delay (Webflow might initialize elements slowly)
+    setTimeout(recomputeSubmitEnabled, 100);
+    setTimeout(recomputeSubmitEnabled, 500);
+
+    // Listen for changes in form fields
+    document.addEventListener("click", (e) => {
+      if (e.target?.closest?.(".dd-item") ||
+          e.target?.closest?.("#dd-exchange-types-list") ||
+          e.target?.closest?.("#receive-type-dd-list")) {
+        setTimeout(recomputeSubmitEnabled, 0);
+      }
+    });
+
+    const sumEl = document.getElementById("sum-input");
+    if (sumEl instanceof HTMLInputElement) {
+      sumEl.addEventListener("input", () => setTimeout(recomputeSubmitEnabled, 0));
+      sumEl.addEventListener("blur", () => setTimeout(recomputeSubmitEnabled, 0));
+    }
+
+    const walletEl = document.getElementById("wallet-address-input");
+    if (walletEl instanceof HTMLInputElement) {
+      walletEl.addEventListener("input", () => setTimeout(recomputeSubmitEnabled, 0));
+      walletEl.addEventListener("blur", () => setTimeout(recomputeSubmitEnabled, 0));
+    }
+
+    // Handle form submission
+    let isSubmitting = false;
+
+    async function handleSubmit(event) {
+      // Prevent default Webflow form submission
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      if (isSubmitting) return;
+
+      // Final validation check
+      if (!isFormReadyToSubmit()) {
+        recomputeSubmitEnabled();
+        return;
+      }
+
+      isSubmitting = true;
+
+      try {
+        await sendLeadToBackend();
+        window.location.href = "/bot-done";
+      } catch (error) {
+        console.error("Submission error:", error);
+        window.location.href = "/bot-done";
+      } finally {
+        isSubmitting = false;
+      }
+    }
+
+    // Attach event listeners
+    btn.addEventListener("click", handleSubmit);
+    form.addEventListener("submit", handleSubmit);
+  });
+})();
+</script>
