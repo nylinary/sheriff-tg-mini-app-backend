@@ -63,14 +63,29 @@ async def _get_current_user(request: Request, db: AsyncSession) -> User:
 async def _post_webhook_json(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     webhook_url = getattr(settings, "lead_webhook_url", None)
     if not webhook_url:
-        return None
+      # Not configured
+      return None
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(webhook_url, json=payload)
+    try:
+        timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.post(webhook_url, json=payload)
+
+        # Log non-2xx (common reason "it doesn't work")
+        if r.status_code < 200 or r.status_code >= 300:
+            log.warning("Webhook responded with non-2xx: %s %s", r.status_code, r.text)
+
         try:
-            return {"status": r.status_code, "body": r.json()}
+            body = r.json()
         except Exception:
-            return {"status": r.status_code, "body": r.text}
+            body = r.text
+
+        return {"status": r.status_code, "body": body}
+
+    except Exception as e:
+        # Make failures visible in logs and API response
+        log.exception("Webhook call failed: %s", e)
+        return {"status": 0, "error": str(e)}
 
 
 @leads_router.post("/leads")
@@ -106,13 +121,16 @@ async def create_lead(body: LeadCreate, request: Request, db: AsyncSession = Dep
     out["lead_id"] = lead.id
 
     # forward to webhook if configured
+    webhook_url = getattr(settings, "lead_webhook_url", None)
     webhook_result = await _post_webhook_json(out)
 
     log.info("LEAD %s", out)
+    if webhook_url:
+        log.info("Webhook forward enabled: %s", webhook_url)
 
     return {
         "ok": True,
         "lead_id": lead.id,
-        "forwarded": bool(getattr(settings, "lead_webhook_url", None)),
+        "forwarded": bool(webhook_url),
         "webhook_result": webhook_result,
     }
