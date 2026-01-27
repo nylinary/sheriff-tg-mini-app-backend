@@ -42,18 +42,22 @@ async def auth_telegram_webapp(payload: AuthPayload, request: Request, db: Async
     if not tg_user_id:
         raise HTTPException(400, "Telegram user id missing")
 
-    # Store or update user in DB
-    result = await db.execute(select(User).where(User.tg_user_id == int(tg_user_id)))
+    tg_user_id_str = str(tg_user_id).strip()
+    if not tg_user_id_str.isdigit():
+        raise HTTPException(400, "Telegram user id invalid")
+
+    # Store or update user in DB (tg_user_id stored as string)
+    result = await db.execute(select(User).where(User.tg_user_id == tg_user_id_str))
     user = result.scalars().first()
     if user:
         user.username = username
     else:
-        user = User(tg_user_id=int(tg_user_id), username=username)
+        user = User(tg_user_id=tg_user_id_str, username=username)
         db.add(user)
     await db.commit()
 
     # Issue tokens
-    subject = str(tg_user_id)
+    subject = tg_user_id_str
     access_token = create_token(token_type="access", subject=subject, ttl_seconds=settings.access_token_ttl_seconds)
     refresh_token = create_token(token_type="refresh", subject=subject, ttl_seconds=settings.refresh_token_ttl_seconds)
 

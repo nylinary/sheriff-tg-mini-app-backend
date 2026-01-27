@@ -47,9 +47,9 @@ async def _get_current_user(request: Request, db: AsyncSession) -> User:
     if not sub:
         raise HTTPException(401, "Missing sub")
 
-    try:
-        tg_user_id = int(sub)
-    except Exception:
+    # Store tg_user_id as string in DB to avoid integer overflow
+    tg_user_id = str(sub).strip()
+    if not tg_user_id.isdigit():
         raise HTTPException(401, "Invalid sub")
 
     result = await db.execute(select(User).where(User.tg_user_id == tg_user_id))
