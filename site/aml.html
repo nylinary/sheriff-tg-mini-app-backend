@@ -11,6 +11,39 @@
   const INPUT_ID = "input-aml";
   const BTN_ID = "aml-check-btn";
 
+  const RESULT_MESSAGE_ID = "aml-result-message";
+
+  function ensureResultMessageEl() {
+    const input = document.getElementById(INPUT_ID);
+    if (!(input instanceof HTMLElement)) return null;
+
+    let el = document.getElementById(RESULT_MESSAGE_ID);
+    if (el instanceof HTMLElement) return el;
+
+    el = document.createElement("p");
+    el.id = RESULT_MESSAGE_ID;
+    el.style.marginTop = "12px";
+    el.style.marginBottom = "0";
+    el.style.color = "#fff";
+    el.style.opacity = "0.9";
+    el.style.fontSize = "14px";
+    el.style.lineHeight = "1.3";
+    el.style.textAlign = "center";
+
+    // insert right after the input
+    input.insertAdjacentElement("afterend", el);
+    return el;
+  }
+
+  function setResultMessage(text, kind /* 'ok' | 'error' | 'neutral' */ = "neutral") {
+    const el = ensureResultMessageEl();
+    if (!el) return;
+    el.textContent = text || "";
+    if (kind === "ok") el.style.color = "#fcedc2";
+    else if (kind === "error") el.style.color = "#ff7b7b";
+    else el.style.color = "#fff";
+  }
+
   function getInputValue() {
     const el = document.getElementById(INPUT_ID);
     return el instanceof HTMLInputElement ? (el.value || "").trim() : "";
@@ -161,10 +194,12 @@
     const wallet = getInputValue();
     if (!wallet) {
       setStatus("Введите адрес кошелька");
+      setResultMessage("", "neutral");
       return;
     }
 
     setStatus("Проверка...");
+    setResultMessage("", "neutral");
 
     const r = await apiFetch(AML_ENDPOINT, {
       method: "POST",
@@ -175,16 +210,21 @@
     const data = await r.json().catch(async () => ({ raw: await r.text() }));
     if (!r.ok) {
       setStatus("Ошибка проверки");
+      setResultMessage("ошибка проверки, попробуйте позже", "error");
       console.error("AML check failed", r.status, data);
       return;
     }
 
     setStatus("Запрос отправлен");
+    setResultMessage("Запрос на проверку успешно отправлен", "ok");
     return data;
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     window.Telegram?.WebApp?.ready?.();
+
+    // ensure message placeholder exists even before first submit
+    ensureResultMessageEl();
 
     const btn = document.getElementById(BTN_ID);
     if (btn) {
