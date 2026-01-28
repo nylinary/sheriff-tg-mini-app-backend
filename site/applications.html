@@ -88,27 +88,25 @@
   }
 
   function render(items) {
-    const root = getBlockEl();
-    if (!root) return;
+    const templateBlock = getBlockEl();
+    if (!templateBlock) return;
 
-    // Clear root
-    while (root.firstChild) root.removeChild(root.firstChild);
-
-    if (!items?.length) {
-      const empty = document.createElement("div");
-      empty.className = "application-text";
-      empty.textContent = "Заявок пока нет";
-      root.appendChild(empty);
+    const templateText = templateBlock.querySelector("#application-text");
+    if (!(templateText instanceof HTMLElement)) {
+      // Fallback to old behavior if template is not present
+      templateBlock.textContent = "Missing #application-text inside #application-block";
       return;
     }
 
-    items.forEach((app) => {
-      const block = document.createElement("div");
-      block.className = "application-block";
+    const parent = templateBlock.parentElement;
+    if (!parent) return;
 
-      const text = document.createElement("div");
-      text.className = "application-text";
-      text.textContent = [
+    // Remove previously generated duplicates (we mark them)
+    parent.querySelectorAll('[data-generated="application"]').forEach((n) => n.remove());
+
+    // Helper to format one application
+    const formatApp = (app) =>
+      [
         `№: ${normalize(app.id)}`,
         `Дата: ${normalize(app.created_at)}`,
         `Город: ${normalize(app.city)}`,
@@ -118,12 +116,46 @@
         `Тип получения: ${normalize(app.receive_type)}`,
       ].join("\n");
 
-      // Keep newlines visible
-      text.style.whiteSpace = "pre-line";
+    // Ensure white text + newlines
+    const applyTextStyle = (textEl) => {
+      if (!(textEl instanceof HTMLElement)) return;
+      textEl.style.whiteSpace = "pre-line";
+      textEl.style.color = "#fff";
+    };
 
-      block.appendChild(text);
-      root.appendChild(block);
-    });
+    const fillBlock = (blockEl, textValue) => {
+      const textEl = blockEl.querySelector("#application-text");
+      if (textEl) {
+        textEl.textContent = textValue;
+        applyTextStyle(textEl);
+      }
+    };
+
+    if (!items?.length) {
+      fillBlock(templateBlock, "Заявок пока нет");
+      return;
+    }
+
+    // 1) Fill existing block with the first application
+    fillBlock(templateBlock, formatApp(items[0]));
+
+    // 2) For the rest: clone the template block and insert as preceding siblings
+    for (let i = 1; i < items.length; i++) {
+      const clone = templateBlock.cloneNode(true);
+      if (!(clone instanceof HTMLElement)) continue;
+
+      // Mark so we can remove on re-render
+      clone.setAttribute("data-generated", "application");
+
+      // IDs must be unique: remove ids in clones
+      clone.removeAttribute("id");
+      const cloneText = clone.querySelector("#application-text");
+      if (cloneText instanceof HTMLElement) cloneText.removeAttribute("id");
+
+      fillBlock(clone, formatApp(items[i]));
+
+      parent.insertBefore(clone, templateBlock);
+    }
   }
 
   async function loadApplications() {
