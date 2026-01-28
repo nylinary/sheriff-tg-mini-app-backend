@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Optional: where to forward leads as webhook
     lead_webhook_url: str | None = None
 
+    # Optional: where to forward AML checks as webhook
+    aml_webhook_url: str | None = None
+
     # Webflow CMS (for exchange rates)
     webflow_cms_items_url: str | None = None  # e.g. https://api.webflow.com/v2/collections/<id>/items
     webflow_api_key: str | None = None

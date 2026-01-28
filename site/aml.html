@@ -1,0 +1,201 @@
+<!-- AML page ("AML проверка кошелька") -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function () {
+  const BACKEND_BASE = "https://sheriff-tg-mini-app-backend-dev.up.railway.app";
+  const AUTH_ENDPOINT = "/auth/telegram-webapp";
+  const AUTH_REFRESH_ENDPOINT = "/auth/refresh";
+  const AML_ENDPOINT = "/aml/check";
+  const TOKEN_STORAGE_KEY = "__sheriff_tokens_v1";
+
+  const INPUT_ID = "input-aml";
+  const BTN_ID = "aml-check-btn";
+
+  function getInputValue() {
+    const el = document.getElementById(INPUT_ID);
+    return el instanceof HTMLInputElement ? (el.value || "").trim() : "";
+  }
+
+  function setStatus(text) {
+    // Reuse existing Webflow block: any element with text "Обновление" can be replaced.
+    const candidates = Array.from(document.querySelectorAll("*"))
+      .filter((n) => n instanceof HTMLElement)
+      .filter((n) => (n.textContent || "").trim() === "Обновление");
+    const el = candidates[0];
+    if (el) el.textContent = text;
+  }
+
+  function getStoredTokens() {
+    try {
+      return JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function setStoredTokens(tokens) {
+    if (!tokens) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      TOKEN_STORAGE_KEY,
+      JSON.stringify({
+        ...tokens,
+        saved_at: Date.now(),
+      })
+    );
+  }
+
+  function clearStoredTokens() {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+
+  function hasInitData() {
+    return !!(window.Telegram?.WebApp?.initData || "");
+  }
+
+  async function telegramAuth() {
+    if (!hasInitData()) throw new Error("No Telegram initData");
+
+    const payload = {
+      initData: window.Telegram.WebApp.initData,
+      meta: {
+        platform: window.Telegram?.WebApp?.platform || null,
+        version: window.Telegram?.WebApp?.version || null,
+        color_scheme: window.Telegram?.WebApp?.colorScheme || null,
+        page_url: location.href,
+        user_agent: navigator.userAgent,
+      },
+    };
+
+    const r = await fetch(BACKEND_BASE + AUTH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) throw new Error(`Auth failed HTTP ${r.status}: ${JSON.stringify(data)}`);
+
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || "bearer",
+        expires_in: data.expires_in || null,
+      });
+    }
+
+    return data;
+  }
+
+  async function refreshAccessToken() {
+    const r = await fetch(BACKEND_BASE + AUTH_REFRESH_ENDPOINT, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) {
+      clearStoredTokens();
+      throw new Error(`Refresh failed HTTP ${r.status}: ${JSON.stringify(data)}`);
+    }
+
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || "bearer",
+        expires_in: data.expires_in || null,
+      });
+    }
+
+    return data;
+  }
+
+  async function apiFetch(path, options = {}) {
+    // 1) attempt with current token
+    const stored = getStoredTokens();
+    const headers = new Headers(options.headers || {});
+    if (stored?.access_token) headers.set("Authorization", `Bearer ${stored.access_token}`);
+
+    let r = await fetch(BACKEND_BASE + path, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+
+    if (r.status !== 401) return r;
+
+    // 2) refresh, retry
+    try {
+      await refreshAccessToken();
+      const stored2 = getStoredTokens();
+      const headers2 = new Headers(options.headers || {});
+      if (stored2?.access_token) headers2.set("Authorization", `Bearer ${stored2.access_token}`);
+
+      r = await fetch(BACKEND_BASE + path, {
+        ...options,
+        headers: headers2,
+        credentials: "include",
+      });
+      if (r.status !== 401) return r;
+    } catch {}
+
+    // 3) full auth, retry
+    await telegramAuth();
+    const stored3 = getStoredTokens();
+    const headers3 = new Headers(options.headers || {});
+    if (stored3?.access_token) headers3.set("Authorization", `Bearer ${stored3.access_token}`);
+
+    return fetch(BACKEND_BASE + path, {
+      ...options,
+      headers: headers3,
+      credentials: "include",
+    });
+  }
+
+  async function submitAml() {
+    const wallet = getInputValue();
+    if (!wallet) {
+      setStatus("Введите адрес кошелька");
+      return;
+    }
+
+    setStatus("Проверка...");
+
+    const r = await apiFetch(AML_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet_address: wallet }),
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) {
+      setStatus("Ошибка проверки");
+      console.error("AML check failed", r.status, data);
+      return;
+    }
+
+    setStatus("Запрос отправлен");
+    return data;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    window.Telegram?.WebApp?.ready?.();
+
+    const btn = document.getElementById(BTN_ID);
+    if (btn) {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        submitAml();
+      });
+    } else {
+      console.warn(`AML button #${BTN_ID} not found`);
+    }
+  });
+})();
+</script>

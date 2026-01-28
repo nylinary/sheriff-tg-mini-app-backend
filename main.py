@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers.auth import auth_router
 from routers.users import users_router
 from routers.leads import leads_router
+from routers.aml import aml_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("miniapp")
@@ -27,3 +28,4 @@ def health():
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(leads_router)
+app.include_router(aml_router)
