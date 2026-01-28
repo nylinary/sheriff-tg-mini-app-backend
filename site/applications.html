@@ -68,6 +68,36 @@
   .telegram-webview {
     overflow-y: auto !important;
   }
+
+  /* Style for generated application blocks */
+  [data-generated="application"] {
+    display: block !important;
+    margin: 0 auto 16px auto !important;
+    padding: 16px !important;
+    width: calc(100% - 32px) !important;
+    max-width: 600px !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    border: 2px solid #fcedc2 !important;
+    border-radius: 8px !important;
+    white-space: pre-line !important;
+    color: #fff !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Ensure sections and containers allow full width */
+  section[class*="container"],
+  [class*="section"] [class*="container"],
+  .w-container,
+  div[role="main"] > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    box-sizing: border-box !important;
+  }
 </style>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -131,122 +161,212 @@
     return data;
   }
 
-  async function apiFetch(path, options = {}) {
-    const tokens = getStoredTokens();
-    const headers = new Headers(options.headers || {});
+  // Try to get new tokens if refresh fails
+  async function reAuthenticate() {
+    const initData = window.Telegram?.WebApp?.initData || "";
+    if (!initData) throw new Error("No Telegram initData for re-auth");
 
+    // Must match backend router: POST /auth/telegram-webapp { initData, meta }
+    const r = await fetch(BACKEND_BASE + "/auth/telegram-webapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        initData,
+        meta: {
+          platform: window.Telegram?.WebApp?.platform || null,
+          version: window.Telegram?.WebApp?.version || null,
+          page_url: location.href,
+          user_agent: navigator.userAgent,
+        },
+      }),
+      credentials: "include",
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) throw new Error(`Re-auth failed HTTP ${r.status}: ${JSON.stringify(data)}`);
+
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || "bearer",
+        expires_in: data.expires_in || null,
+      });
+    }
+
+    return data;
+  }
+
+  async function apiFetch(path, options = {}) {
+    // Debug: log outgoing request
+    console.log("apiFetch:", { path, method: options.method || "GET" });
+
+    let tokens = getStoredTokens();
+    let headers = new Headers(options.headers || {});
     if (tokens?.access_token) headers.set("Authorization", `Bearer ${tokens.access_token}`);
 
-    const first = await fetch(BACKEND_BASE + path, {
+    let r = await fetch(BACKEND_BASE + path, {
       ...options,
       headers,
       credentials: "include",
     });
+    if (r.status !== 401) return r;
 
-    if (first.status !== 401) return first;
+    // Try refresh
+    try {
+      await refreshAccessToken();
+      tokens = getStoredTokens();
+      headers = new Headers(options.headers || {});
+      if (tokens?.access_token) headers.set("Authorization", `Bearer ${tokens.access_token}`);
+      r = await fetch(BACKEND_BASE + path, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+      if (r.status !== 401) return r;
+    } catch (e) {
+      console.warn("refreshAccessToken failed", e);
+    }
 
-    await refreshAccessToken();
-
-    const tokens2 = getStoredTokens();
-    const headers2 = new Headers(options.headers || {});
-    if (tokens2?.access_token) headers2.set("Authorization", `Bearer ${tokens2.access_token}`);
-
-    return fetch(BACKEND_BASE + path, {
-      ...options,
-      headers: headers2,
-      credentials: "include",
-    });
+    // Try re-authenticate
+    try {
+      await reAuthenticate();
+      tokens = getStoredTokens();
+      headers = new Headers(options.headers || {});
+      if (tokens?.access_token) headers.set("Authorization", `Bearer ${tokens.access_token}`);
+      r = await fetch(BACKEND_BASE + path, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+      return r;
+    } catch (e) {
+      console.warn("reAuthenticate failed", e);
+      return r;
+    }
   }
 
   function render(items) {
     const templateBlock = getBlockEl();
     if (!templateBlock) return;
 
-    const parent = templateBlock.parentElement;
-    if (!parent) return;
+    // Находим контейнер секции - родителя application-block
+    const sectionContainer = templateBlock.parentElement;
+    if (!sectionContainer) return;
 
-    // Remove previously generated duplicates
-    parent.querySelectorAll('[data-generated="application"]').forEach((n) => n.remove());
+    // Удаляем ВСЕ ранее созданные блоки
+    sectionContainer.querySelectorAll('[data-generated="application"]').forEach((n) => n.remove());
 
-    const templateTextEl = templateBlock.querySelector("#application-text") || templateBlock;
+    // Скрываем оригинальный блок-шаблон (он нам нужен только как образец)
+    templateBlock.style.display = "none";
 
     const formatDateTime = (isoString) => {
-      if (!isoString) return "—";
-      try {
-        const date = new Date(isoString);
-        if (isNaN(date.getTime())) return isoString;
-        
-        const day = String(date.getDate()).padStart(2, "0");
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const year = date.getFullYear();
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        
-        return `${day}.${month}.${year} ${hours}:${minutes}`;
-      } catch {
-        return isoString;
-      }
+        if (!isoString) return "—";
+        try {
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) return isoString;
+            
+            const day = String(date.getDate()).padStart(2, "0");
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, "0");
+            const minutes = String(date.getMinutes()).padStart(2, "0");
+            
+            return `${day}.${month}.${year} ${hours}:${minutes}`;
+        } catch {
+            return isoString;
+        }
     };
 
     const formatApp = (app) =>
-      [
-        `№: ${normalize(app.id)}`,
-        `Дата: ${formatDateTime(app.created_at)}`,
-        `Город: ${normalize(app.city)}`,
-        "",
-        `Тип сделки: ${normalize(app.exchange_type)}`,
-        `Сумма: ${normalize(app.sum)}`,
-        `Тип получения: ${normalize(app.receive_type)}`,
-      ].join("\n");
-
-    const applyTextStyle = (el) => {
-      if (!(el instanceof HTMLElement)) return;
-      el.style.whiteSpace = "pre-line";
-      el.style.color = "#fff";
-    };
-
-    const fillBlock = (blockEl, textValue) => {
-      const textEl = blockEl.querySelector("#application-text") || blockEl;
-      if (!(textEl instanceof HTMLElement)) return;
-      textEl.textContent = textValue;
-      applyTextStyle(textEl);
-    };
+        [
+            `№: ${normalize(app.id)}`,
+            `Дата: ${formatDateTime(app.created_at)}`,
+            `Город: ${normalize(app.city)}`,
+            "",
+            `Тип сделки: ${normalize(app.exchange_type)}`,
+            `Сумма: ${normalize(app.sum)}`,
+            `Тип получения: ${normalize(app.receive_type)}`,
+        ].join("\n");
 
     if (!items?.length) {
-      fillBlock(templateBlock, "Заявок пока нет");
-      return;
+        // Если нет заявок, показываем сообщение в отдельном блоке
+        const noAppsBlock = document.createElement('div');
+        noAppsBlock.setAttribute("data-generated", "application");
+        noAppsBlock.textContent = "Заявок пока нет";
+        noAppsBlock.style.cssText = `
+            display: block !important;
+            margin: 0 auto 16px auto !important;
+            padding: 16px !important;
+            width: calc(100% - 32px) !important;
+            max-width: 600px !important;
+            background: rgba(255, 255, 255, 0.1) !important;
+            border: 2px solid #fcedc2 !important;
+            border-radius: 8px !important;
+            white-space: pre-line !important;
+            color: #fff !important;
+            font-family: inherit !important;
+            font-size: inherit !important;
+            line-height: inherit !important;
+            box-sizing: border-box !important;
+        `;
+        sectionContainer.insertBefore(noAppsBlock, templateBlock);
+        return;
     }
 
-    // Fill existing block with the first application
-    fillBlock(templateBlock, formatApp(items[0]));
-
-    // Clone for the rest
-    for (let i = 1; i < items.length; i++) {
-      const clone = templateBlock.cloneNode(true);
-      if (!(clone instanceof HTMLElement)) continue;
-
-      clone.setAttribute("data-generated", "application");
-
-      // Important: ensure unique ids in clones (Webflow template uses id=application-block)
-      clone.removeAttribute("id");
-      const inner = clone.querySelector("#application-text");
-      if (inner instanceof HTMLElement) inner.removeAttribute("id");
-
-      fillBlock(clone, formatApp(items[i]));
-
-      // Insert before the template as requested
-      parent.insertBefore(clone, templateBlock);
-    }
+    // Создаем блоки для ВСЕХ заявок
+    items.forEach((item, index) => {
+        const newBlock = document.createElement('div');
+        newBlock.setAttribute("data-generated", "application");
+        
+        // Применяем обновленные стили с желтой рамкой и почти полной шириной
+        newBlock.style.cssText = `
+            display: block !important;
+            margin: 0 auto 16px auto !important;
+            padding: 16px !important;
+            width: calc(100% - 32px) !important;
+            max-width: 600px !important;
+            background: rgba(255, 255, 255, 0.1) !important;
+            border: 2px solid #fcedc2 !important;
+            border-radius: 8px !important;
+            white-space: pre-line !important;
+            color: #fff !important;
+            font-family: inherit !important;
+            font-size: inherit !important;
+            line-height: inherit !important;
+            box-sizing: border-box !important;
+        `;
+        
+        // Устанавливаем текст заявки
+        newBlock.textContent = formatApp(item);
+        
+        // Вставляем блок в контейнер, ПЕРЕД оригинальным блоком-шаблоном
+        sectionContainer.insertBefore(newBlock, templateBlock);
+    });
   }
 
-  async function loadApplications() {
+  async function loadApplications(retryOnAuth = true) {
     const block = getBlockEl();
     if (block) {
-        block.textContent = "Загрузка...";
-        block.style.color = "#fff";
+        // Показываем загрузку в оригинальном блоке
+        const textEl = block.querySelector("#application-text") || block;
+        textEl.textContent = "Загрузка...";
+        textEl.style.whiteSpace = "pre-line";
+        textEl.style.color = "#fff";
+        block.style.display = "block";
     }
 
     const r = await apiFetch(APPS_ENDPOINT, { method: "GET" });
+
+    if (r.status === 401 && retryOnAuth) {
+      // Try to re-authenticate and retry ONCE
+      try {
+        await reAuthenticate();
+        return await loadApplications(false);
+      } catch (e) {
+        // fall through to error
+      }
+    }
 
     if (!r.ok) {
         const text = await r.text().catch(() => "");
@@ -254,7 +374,6 @@
     }
 
     const data = await r.json().catch(async () => ({ raw: await r.text() }));
-    
     // Сортируем заявки по дате создания в обратном порядке (новые сверху)
     let items = data.items || [];
     items.sort((a, b) => {
@@ -262,7 +381,6 @@
         const dateB = new Date(b.created_at || 0).getTime();
         return dateB - dateA; // Обратный порядок
     });
-    
     render(items);
   }
 
@@ -317,6 +435,16 @@
       document.documentElement.style.overflow = '';
       document.documentElement.style.overflowX = '';
       document.documentElement.style.overflowY = '';
+      
+      // Ensure containers allow full width
+      const containers = document.querySelectorAll('section[class*="container"], [class*="section"] [class*="container"], .w-container');
+      containers.forEach(container => {
+        container.style.width = '100%';
+        container.style.maxWidth = '100%';
+        container.style.paddingLeft = '16px';
+        container.style.paddingRight = '16px';
+        container.style.boxSizing = 'border-box';
+      });
     }, 50);
 
     // Load applications
@@ -333,7 +461,13 @@
     } catch (e) {
       console.error("Failed to load applications", e);
       const block = getBlockEl();
-      if (block) block.textContent = "Не удалось загрузить заявки";
+      if (block) {
+          const textEl = block.querySelector("#application-text") || block;
+          textEl.textContent = "Не удалось загрузить заявки";
+          textEl.style.whiteSpace = "pre-line";
+          textEl.style.color = "#fff";
+          block.style.display = "block";
+      }
     }
   });
 })();

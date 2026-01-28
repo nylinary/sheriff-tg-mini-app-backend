@@ -462,6 +462,23 @@
     bindInputPersistence();
   });
 
+  // Keep #selected-city in sync with user selection on THIS page.
+  // Use capture so we run even if Webflow stops propagation.
+  document.addEventListener(
+    "click",
+    (e) => {
+      const item = e.target?.closest?.(".dd-item");
+      if (!item) return;
+      const cityName = item.getAttribute("data-city-name") || item.textContent.trim();
+      const label = document.getElementById("selected-city");
+      if (label && cityName) label.textContent = cityName;
+    },
+    true
+  );
+
+  // NOTE: Removed the DOMContentLoaded city-sync fallback that picked the first .dd-item
+  // and could overwrite the actual selected city.
+
   // Extend API
   window.SheriffExchangeTypes = {
     applyExchangeTypesForCity,
@@ -751,32 +768,18 @@
     );
   }
 
-  // Get form field values
+  // Get form field values - read directly from DOM labels
   function getSelectedCity() {
-    // prefer storage (existing behavior)
-    const stored = localStorage.getItem(CITY_STORAGE_KEY) || "";
-    const v = normalizeLabel(stored);
-    if (v) return v;
-
-    // fallback: read from UI label
     const el = document.getElementById("selected-city");
     return normalizeLabel(el?.textContent || "");
   }
 
   function getSelectedExchangeType() {
-    const stored = localStorage.getItem("__sheriff_selected_exchange_type_v1") || "";
-    const v = normalizeLabel(stored);
-    if (v) return v;
-
     const el = document.getElementById("selected-echange-type-label");
     return normalizeLabel(el?.textContent || "");
   }
 
   function getSelectedReceiveType() {
-    const stored = localStorage.getItem("__sheriff_selected_receive_type_v1") || "";
-    const v = normalizeLabel(stored);
-    if (v) return v;
-
     const el = document.getElementById("receive-type-dd-label");
     return normalizeLabel(el?.textContent || "");
   }
