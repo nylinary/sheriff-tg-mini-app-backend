@@ -1,0 +1,152 @@
+<!-- Applications page ("Мои заявки") -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function () {
+  const BACKEND_BASE = "https://sheriff-tg-mini-app-backend-dev.up.railway.app";
+  const AUTH_REFRESH_ENDPOINT = "/auth/refresh";
+  const APPS_ENDPOINT = "/me/applications";
+  const TOKEN_STORAGE_KEY = "__sheriff_tokens_v1";
+
+  const BLOCK_ID = "application-block";
+
+  function getBlockEl() {
+    return document.getElementById(BLOCK_ID);
+  }
+
+  function normalize(s) {
+    return String(s ?? "").trim();
+  }
+
+  function getStoredTokens() {
+    try {
+      return JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function setStoredTokens(tokens) {
+    if (!tokens) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      TOKEN_STORAGE_KEY,
+      JSON.stringify({
+        ...tokens,
+        saved_at: Date.now(),
+      })
+    );
+  }
+
+  async function refreshAccessToken() {
+    const r = await fetch(BACKEND_BASE + AUTH_REFRESH_ENDPOINT, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+
+    if (data?.access_token && data?.refresh_token) {
+      setStoredTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type || "bearer",
+        expires_in: data.expires_in || null,
+      });
+    }
+
+    return data;
+  }
+
+  async function apiFetch(path, options = {}) {
+    const tokens = getStoredTokens();
+    const headers = new Headers(options.headers || {});
+
+    if (tokens?.access_token) headers.set("Authorization", `Bearer ${tokens.access_token}`);
+
+    const first = await fetch(BACKEND_BASE + path, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+
+    if (first.status !== 401) return first;
+
+    await refreshAccessToken();
+
+    const tokens2 = getStoredTokens();
+    const headers2 = new Headers(options.headers || {});
+    if (tokens2?.access_token) headers2.set("Authorization", `Bearer ${tokens2.access_token}`);
+
+    return fetch(BACKEND_BASE + path, {
+      ...options,
+      headers: headers2,
+      credentials: "include",
+    });
+  }
+
+  function render(items) {
+    const root = getBlockEl();
+    if (!root) return;
+
+    // Clear root
+    while (root.firstChild) root.removeChild(root.firstChild);
+
+    if (!items?.length) {
+      const empty = document.createElement("div");
+      empty.className = "application-text";
+      empty.textContent = "Заявок пока нет";
+      root.appendChild(empty);
+      return;
+    }
+
+    items.forEach((app) => {
+      const block = document.createElement("div");
+      block.className = "application-block";
+
+      const text = document.createElement("div");
+      text.className = "application-text";
+      text.textContent = [
+        `№: ${normalize(app.id)}`,
+        `Дата: ${normalize(app.created_at)}`,
+        `Город: ${normalize(app.city)}`,
+        "",
+        `Тип сделки: ${normalize(app.exchange_type)}`,
+        `Сумма: ${normalize(app.sum)}`,
+        `Тип получения: ${normalize(app.receive_type)}`,
+      ].join("\n");
+
+      // Keep newlines visible
+      text.style.whiteSpace = "pre-line";
+
+      block.appendChild(text);
+      root.appendChild(block);
+    });
+  }
+
+  async function loadApplications() {
+    const block = getBlockEl();
+    if (block) block.textContent = "Загрузка...";
+
+    const r = await apiFetch(APPS_ENDPOINT, { method: "GET" });
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    if (!r.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+
+    render(data.items || []);
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.Telegram?.WebApp?.ready?.();
+
+    try {
+      await loadApplications();
+    } catch (e) {
+      console.error("Failed to load applications", e);
+      const block = getBlockEl();
+      if (block) block.textContent = "Не удалось загрузить заявки";
+    }
+  });
+})();
+</script>
