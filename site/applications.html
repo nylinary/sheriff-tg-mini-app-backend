@@ -1,4 +1,75 @@
 <!-- Applications page ("Мои заявки") -->
+<style>
+  /* Telegram WebView scroll fix - IMPORTANT FIX */
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+
+  /* Main content container */
+  body > div:first-child,
+  .w-webflow-badge ~ div,
+  .page-wrapper {
+    min-height: 100%;
+    height: auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Fix for Webflow's main container */
+  [class*="container"]:not([class*="navbar"]):not([class*="footer"]) {
+    min-height: 100vh;
+    height: auto;
+    overflow: visible !important;
+  }
+
+  /* Cards container - ensure no overflow hidden */
+  #application-block,
+  [data-generated="application"] {
+    display: block;
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 2;
+  }
+
+  /* Remove any overflow:hidden from parent containers */
+  section,
+  [class*="section"],
+  [class*="content"],
+  [class*="wrapper"],
+  .w-container,
+  div[role="main"] {
+    overflow: visible !important;
+    min-height: auto !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  /* Ensure all content is visible */
+  * {
+    max-height: none !important;
+  }
+
+  /* Add bottom padding for scroll space */
+  body::after {
+    content: "";
+    display: block;
+    height: 40px;
+    width: 100%;
+  }
+
+  /* Telegram specific fixes */
+  .telegram-webview {
+    overflow-y: auto !important;
+  }
+</style>
+
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
 (function () {
@@ -91,24 +162,36 @@
     const templateBlock = getBlockEl();
     if (!templateBlock) return;
 
-    const templateText = templateBlock.querySelector("#application-text");
-    if (!(templateText instanceof HTMLElement)) {
-      // Fallback to old behavior if template is not present
-      templateBlock.textContent = "Missing #application-text inside #application-block";
-      return;
-    }
-
     const parent = templateBlock.parentElement;
     if (!parent) return;
 
-    // Remove previously generated duplicates (we mark them)
+    // Remove previously generated duplicates
     parent.querySelectorAll('[data-generated="application"]').forEach((n) => n.remove());
 
-    // Helper to format one application
+    const templateTextEl = templateBlock.querySelector("#application-text") || templateBlock;
+
+    const formatDateTime = (isoString) => {
+      if (!isoString) return "—";
+      try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return isoString;
+        
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+        
+        return `${day}.${month}.${year} ${hours}:${minutes}`;
+      } catch {
+        return isoString;
+      }
+    };
+
     const formatApp = (app) =>
       [
         `№: ${normalize(app.id)}`,
-        `Дата: ${normalize(app.created_at)}`,
+        `Дата: ${formatDateTime(app.created_at)}`,
         `Город: ${normalize(app.city)}`,
         "",
         `Тип сделки: ${normalize(app.exchange_type)}`,
@@ -116,19 +199,17 @@
         `Тип получения: ${normalize(app.receive_type)}`,
       ].join("\n");
 
-    // Ensure white text + newlines
-    const applyTextStyle = (textEl) => {
-      if (!(textEl instanceof HTMLElement)) return;
-      textEl.style.whiteSpace = "pre-line";
-      textEl.style.color = "#fff";
+    const applyTextStyle = (el) => {
+      if (!(el instanceof HTMLElement)) return;
+      el.style.whiteSpace = "pre-line";
+      el.style.color = "#fff";
     };
 
     const fillBlock = (blockEl, textValue) => {
-      const textEl = blockEl.querySelector("#application-text");
-      if (textEl) {
-        textEl.textContent = textValue;
-        applyTextStyle(textEl);
-      }
+      const textEl = blockEl.querySelector("#application-text") || blockEl;
+      if (!(textEl instanceof HTMLElement)) return;
+      textEl.textContent = textValue;
+      applyTextStyle(textEl);
     };
 
     if (!items?.length) {
@@ -136,44 +217,119 @@
       return;
     }
 
-    // 1) Fill existing block with the first application
+    // Fill existing block with the first application
     fillBlock(templateBlock, formatApp(items[0]));
 
-    // 2) For the rest: clone the template block and insert as preceding siblings
+    // Clone for the rest
     for (let i = 1; i < items.length; i++) {
       const clone = templateBlock.cloneNode(true);
       if (!(clone instanceof HTMLElement)) continue;
 
-      // Mark so we can remove on re-render
       clone.setAttribute("data-generated", "application");
 
-      // IDs must be unique: remove ids in clones
+      // Important: ensure unique ids in clones (Webflow template uses id=application-block)
       clone.removeAttribute("id");
-      const cloneText = clone.querySelector("#application-text");
-      if (cloneText instanceof HTMLElement) cloneText.removeAttribute("id");
+      const inner = clone.querySelector("#application-text");
+      if (inner instanceof HTMLElement) inner.removeAttribute("id");
 
       fillBlock(clone, formatApp(items[i]));
 
+      // Insert before the template as requested
       parent.insertBefore(clone, templateBlock);
     }
   }
 
   async function loadApplications() {
     const block = getBlockEl();
-    if (block) block.textContent = "Загрузка...";
+    if (block) {
+        block.textContent = "Загрузка...";
+        block.style.color = "#fff";
+    }
 
     const r = await apiFetch(APPS_ENDPOINT, { method: "GET" });
-    const data = await r.json().catch(async () => ({ raw: await r.text() }));
-    if (!r.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
 
-    render(data.items || []);
+    if (!r.ok) {
+        const text = await r.text().catch(() => "");
+        throw new Error(`HTTP ${r.status}: ${text}`);
+    }
+
+    const data = await r.json().catch(async () => ({ raw: await r.text() }));
+    
+    // Сортируем заявки по дате создания в обратном порядке (новые сверху)
+    let items = data.items || [];
+    items.sort((a, b) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA; // Обратный порядок
+    });
+    
+    render(items);
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
-    window.Telegram?.WebApp?.ready?.();
+    // Telegram WebApp initialization
+    if (window.Telegram?.WebApp) {
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
+      
+      // IMPORTANT: This is crucial for scrolling to work
+      window.Telegram.WebApp.setHeaderColor('#000000');
+      window.Telegram.WebApp.setBackgroundColor('#000000');
+      
+      // Enable smooth scrolling
+      window.Telegram.WebApp.enableClosingConfirmation?.();
+      
+      // Fix for iOS scrolling
+      if (navigator.userAgent.match(/iPhone|iPad|iPod/)) {
+        document.documentElement.style.height = '100%';
+        document.body.style.height = '100%';
+        document.body.style.overflowY = 'scroll';
+        document.body.style.webkitOverflowScrolling = 'touch';
+        
+        // Force layout update
+        setTimeout(() => {
+          document.body.style.height = (document.body.scrollHeight + 1) + 'px';
+        }, 100);
+      }
+    }
 
+    // Remove any touch event blocking
+    document.body.addEventListener('touchmove', function(e) {
+      // Allow all touch events to propagate for scrolling
+    }, { passive: true });
+
+    // Add scroll event listener to ensure scrolling works
+    document.addEventListener('scroll', function() {
+      // This helps trigger scrolling on iOS
+    }, { passive: true });
+
+    // Fix Webflow's body height
+    setTimeout(() => {
+      document.body.style.minHeight = '100vh';
+      document.body.style.height = 'auto';
+      
+      // Remove any overflow:hidden from body
+      document.body.style.overflow = '';
+      document.body.style.overflowX = '';
+      document.body.style.overflowY = '';
+      
+      // Also fix html element
+      document.documentElement.style.overflow = '';
+      document.documentElement.style.overflowX = '';
+      document.documentElement.style.overflowY = '';
+    }, 50);
+
+    // Load applications
     try {
       await loadApplications();
+      
+      // After rendering, ensure scrolling is possible
+      setTimeout(() => {
+        if (document.body.scrollHeight > window.innerHeight) {
+          document.body.style.height = 'auto';
+          document.body.style.minHeight = '100%';
+        }
+      }, 200);
     } catch (e) {
       console.error("Failed to load applications", e);
       const block = getBlockEl();
