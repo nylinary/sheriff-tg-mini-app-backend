@@ -795,12 +795,15 @@
   }
 
   // Validation
+  const MIN_SUM_USDT = 5000;
+
   function isValidSumValue(raw) {
     if (!isNonEmpty(raw)) return false;
     const normalized = String(raw).trim().replace(/\s+/g, "").replace(/,/g, ".");
     if (!/^([0-9]+(\.[0-9]+)?|\.[0-9]+)$/.test(normalized)) return false;
     const n = Number(normalized);
-    return Number.isFinite(n);
+    if (!Number.isFinite(n)) return false;
+    return n >= MIN_SUM_USDT;
   }
 
   function isFormReadyToSubmit() {
@@ -982,7 +985,13 @@
         recomputeSubmitEnabled();
         // restore href if we blocked it
         if (originalHref) el.setAttribute("href", originalHref);
-        alert("Пожалуйста, заполните все поля формы правильно.");
+
+        const sumN = Number(String(getSumValue() || "").trim().replace(/\s+/g, "").replace(/,/g, "."));
+        if (!Number.isFinite(sumN) || sumN < MIN_SUM_USDT) {
+          alert(`Минимальная сумма: ${MIN_SUM_USDT} USDT`);
+        } else {
+          alert("Пожалуйста, заполните все поля формы правильно.");
+        }
         return;
       }
 
