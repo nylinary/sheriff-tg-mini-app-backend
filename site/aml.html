@@ -10,6 +10,7 @@
 
   const INPUT_ID = "input-aml";
   const BTN_ID = "aml-check-btn";
+  const TRC20_WALLET_LEN = 34;
 
   const RESULT_MESSAGE_ID = "aml-result-message";
 
@@ -195,6 +196,12 @@
     if (!wallet) {
       setStatus("Введите адрес кошелька");
       setResultMessage("", "neutral");
+      return;
+    }
+
+    if (wallet.length !== TRC20_WALLET_LEN) {
+      setStatus("Ошибка");
+      setResultMessage("Пожалуйста, введите адрес кошелька TRC-20 (ровно 34 символа).", "error");
       return;
     }
 
